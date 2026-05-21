@@ -42,12 +42,12 @@ def parse_frontmatter(content):
 
 def ensure_gitignore(workspace_dir):
     gitignore_path = os.path.join(workspace_dir, '.gitignore')
-    ignore_rule = '.antigravity/'
+    ignore_rule = '.sessions/'
     
     if not os.path.exists(gitignore_path):
         print(f"Creating .gitignore at {gitignore_path}")
         with open(gitignore_path, 'w') as f:
-            f.write(f"# Antigravity Session Journal\n{ignore_rule}\n")
+            f.write(f"# Session Journal\n{ignore_rule}\n")
         return
     
     with open(gitignore_path, 'r') as f:
@@ -55,9 +55,8 @@ def ensure_gitignore(workspace_dir):
     
     # Check if already ignored
     patterns = [
-        r'^\.antigravity/?$',
-        r'^\.antigravity/\*$',
-        r'^\.antigravity/sessions/?$'
+        r'^\.sessions/?$',
+        r'^\.sessions/\*$'
     ]
     
     ignored = False
@@ -75,10 +74,10 @@ def ensure_gitignore(workspace_dir):
     if not ignored:
         print(f"Appending ignore rule to {gitignore_path}")
         with open(gitignore_path, 'a') as f:
-            f.write(f"\n# Antigravity Session Journal\n{ignore_rule}\n")
+            f.write(f"\n# Session Journal\n{ignore_rule}\n")
 
 def generate_executive_summary(workspace_dir):
-    sessions_dir = os.path.join(workspace_dir, '.antigravity', 'sessions')
+    sessions_dir = os.path.join(workspace_dir, '.sessions')
     if not os.path.exists(sessions_dir):
         print(f"Sessions directory does not exist at {sessions_dir}")
         return
@@ -195,7 +194,7 @@ def generate_executive_summary(workspace_dir):
     md.append("")
     
     md.append("---")
-    md.append("*To contribute or log a new session, create a file `.antigravity/sessions/session_<id>.md` with YAML frontmatter and run the summarizer script.*")
+    md.append("*To contribute or log a new session, create a file `.sessions/session_<id>.md` with YAML frontmatter and run the summarizer script.*")
     
     with open(summary_path, 'w') as f:
         f.write('\n'.join(md))
@@ -215,10 +214,10 @@ def main():
         sys.exit(1)
         
     # Create sessions folder if missing
-    sessions_dir = os.path.join(workspace_dir, '.antigravity', 'sessions')
+    sessions_dir = os.path.join(workspace_dir, '.sessions')
     os.makedirs(sessions_dir, exist_ok=True)
     
-    # Ensure gitignore contains .antigravity/
+    # Ensure gitignore contains .sessions/
     ensure_gitignore(workspace_dir)
     
     # Regenerate executive summary

@@ -11,8 +11,8 @@ These skills run **globally** inside your agent's App Data environment, enabling
 The **Session Journal** skill automatically logs, tracks, and summarizes active coding sessions and discussions inside your workspace. It generates beautifully formatted local diaries for each session and maintains a master **Executive Summary** index showing key accomplishments, technical challenges resolved, and opportunities for public content (such as blog posts, videos, and open-source snippets).
 
 ### Key Features
-* **Local-First Diaries**: Writes session notes inside a hidden `.antigravity/sessions/` folder located at your repository root.
-* **Automated Git Exclusions**: Configures and appends `.antigravity/` to your `.gitignore` file to keep your local notes secure and out of public source control.
+* **Local-First Diaries**: Writes session notes inside a hidden `.sessions/` folder located at your repository root.
+* **Automated Git Exclusions**: Configures and appends `.sessions/` to your `.gitignore` file to keep your local notes secure and out of public source control.
 * **Continuous Tracking Daemon**: A background **Sidecar** daemon that watches your agent conversation logs and regenerates session journals and summaries in real-time (every 5 seconds).
 * **Multi-Session Content Themes**: Supports identifying and documenting long-term architectural themes, systemic pain points, or multi-session bug hunts inside protected HTML comment blocks that are preserved across automatic compiles.
 
@@ -81,7 +81,7 @@ python3 <global_agent_directory>/skills/session-journal/scripts/summarize.py --w
 
 ### Multi-Session Content Themes
 To document development themes or blog post ideas spanning multiple individual sessions (such as resolving a complex database race condition over three days):
-1. Open your workspace's compiled `.antigravity/sessions/executive_summary.md`.
+1. Open your workspace's compiled `.sessions/executive_summary.md`.
 2. Locate the **Multi-Session Themes** section.
 3. Edit and write your thoughts inside the `<!-- START_CUSTOM_THEMES -->` and `<!-- END_CUSTOM_THEMES -->` comment boundaries:
    ```markdown

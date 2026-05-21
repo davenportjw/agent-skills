@@ -1,7 +1,7 @@
 ---
 name: session-journal
 description: |
-  Logs and tracks active programming sessions and user discussions in a hidden `.antigravity/` directory.
+  Logs and tracks active programming sessions and user discussions in a hidden `.sessions/` directory.
   Summarizes challenges faced and lists ideas/code samples for public educational content (blogs, videos, snippets).
   Automatically manages `.gitignore` to keep sessions local and out of public version control.
 license: Apache-2.0
@@ -23,14 +23,13 @@ To maintain workspace cleanliness, this skill automatically configures the repos
 Inside the active workspace, the session logs are stored in a hidden directory:
 ```text
 <workspace_root>/
-└── .antigravity/
-    └── sessions/
-        ├── session_<conversation_id>.md  <-- Current active session journal
-        ├── session_abcdef12-3456-7890.md <-- Past session journal
-        └── executive_summary.md          <-- Master summary & index (AUTO-GENERATED)
+└── .sessions/
+    ├── session_<conversation_id>.md  <-- Current active session journal
+    ├── session_abcdef12-3456-7890.md <-- Past session journal
+    └── executive_summary.md          <-- Master summary & index (AUTO-GENERATED)
 ```
 
-The workspace's `.gitignore` file is automatically appended with `.antigravity/` to keep all logs entirely local to the user's system.
+The workspace's `.gitignore` file is automatically appended with `.sessions/` to keep all logs entirely local to the user's system.
 
 ---
 
@@ -41,7 +40,7 @@ To ensure session logs and the executive summary stay updated and accurate, foll
 ### Step 1: Initialize the Active Session Journal
 At the start of the session, or immediately upon loading this skill:
 1. Locate your active **Conversation ID** (from the prompt metadata or your conversation transcript).
-2. Create a new markdown file: `.antigravity/sessions/session_<conversation_id>.md`.
+2. Create a new markdown file: `.sessions/session_<conversation_id>.md`.
 3. Fill out the frontmatter and structure using the **Session Journal Template** below. Set `status` to `In-Progress`.
 
 ### Step 2: Manage Git Exclusions
@@ -78,7 +77,7 @@ At key milestones during the session, or right before ending your turn:
 
 ## 📝 Session Journal Template
 
-Use this exact structure for individual session markdown files (`.antigravity/sessions/session_<conversation_id>.md`):
+Use this exact structure for individual session markdown files (`.sessions/session_<conversation_id>.md`):
 
 ```markdown
 ---
