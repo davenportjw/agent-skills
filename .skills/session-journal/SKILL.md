@@ -1,18 +1,19 @@
 ---
 name: session-journal
 description: |
-  Logs and tracks active programming sessions and user discussions in a hidden `.sessions/` directory.
-  Summarizes challenges faced and lists ideas/code samples for public educational content (blogs, videos, snippets).
+  Logs and tracks active programming sessions and user discussions in a local hidden `.local/sessions/` directory.
+  Maintains a rolling `SESSION-INDEX.md` across all sessions, highlighting key decisions, active threads, and content opportunities.
+  Supports both manual updates and fully automated tracking via background sidecar.
   Automatically manages `.gitignore` to keep sessions local and out of public version control.
 license: Apache-2.0
 metadata:
-  version: v1
+  version: v2
   publisher: google
 ---
 
 # Session Journal Skill
 
-This skill enables the coding agent to automatically log, track, and summarize active coding sessions and user discussions. It compiles local diaries for each session and keeps a master **Executive Summary** updated. These materials are extremely useful for tracing project history, identifying tricky bugs/solutions, and cataloging ideas for educational blogs, videos, or open-source code examples.
+This skill enables the coding agent to automatically (or manually) log, track, and summarize active coding sessions and user discussions. It compiles local diaries for each session and keeps a master **Session Index** (`SESSION-INDEX.md`) updated. These materials are extremely useful for tracing project history, identifying tricky bugs/solutions, and cataloging ideas for educational blogs, videos, or open-source code examples.
 
 To maintain workspace cleanliness, this skill automatically configures the repository's `.gitignore` file to ensure no session logs are accidentally checked into public version control.
 
@@ -20,64 +21,56 @@ To maintain workspace cleanliness, this skill automatically configures the repos
 
 ## 🛠️ Setup & Directory Structure
 
-Inside the active workspace, the session logs are stored in a hidden directory:
+Inside the active workspace, the session logs are stored in a local directory:
 ```text
 <workspace_root>/
-└── .sessions/
-    ├── session_<conversation_id>.md  <-- Current active session journal
-    ├── session_abcdef12-3456-7890.md <-- Past session journal
-    └── executive_summary.md          <-- Master summary & index (AUTO-GENERATED)
+└── .local/
+    └── sessions/
+        ├── session_<conversation_id>.md  <-- Current active session journal
+        ├── session_abcdef12-3456-7890.md <-- Past session journal
+        └── SESSION-INDEX.md              <-- Master index & summary (AUTO-GENERATED / MANUAL HYBRID)
 ```
 
-The workspace's `.gitignore` file is automatically appended with `.sessions/` to keep all logs entirely local to the user's system.
+The workspace's `.gitignore` file is automatically appended with `.local/` to keep all logs entirely local to the user's system.
 
 ---
 
 ## 🔄 Step-by-Step Workflow
 
-To ensure session logs and the executive summary stay updated and accurate, follow this workflow **unconditionally** in every conversation:
+To ensure session logs and the session index stay updated and accurate, follow this workflow:
 
 ### Step 1: Initialize the Active Session Journal
 At the start of the session, or immediately upon loading this skill:
 1. Locate your active **Conversation ID** (from the prompt metadata or your conversation transcript).
-2. Create a new markdown file: `.sessions/session_<conversation_id>.md`.
+2. Create a new markdown file: `.local/sessions/session_<conversation_id>.md`.
 3. Fill out the frontmatter and structure using the **Session Journal Template** below. Set `status` to `In-Progress`.
 
 ### Step 2: Manage Git Exclusions
-Run the helper script to create directory structures and verify the `.gitignore` exclusion:
-```bash
-python3 <global_agent_directory>/skills/session-journal/scripts/summarize.py --workspace <workspace_path> --conv-id <conversation_id>
-```
+Ensure the `.local/` directory is ignored by checking/updating `.gitignore`. If `.local/` is not listed, append it.
+*(If using the Python helper script, this is automated on every run).*
 
 ### Step 3: Log & Update as the Session Runs
 As you perform work (editing files, fixing compiler warnings, passing tests, discovering undocumented project behavior):
 1. **Log Key Decisions**: Document why a specific implementation pattern was chosen over another.
-2. **Track Challenges**: Note when you encounter complex issues (e.g. tricky pointer errors in Go, unhandled middleware exceptions, container setup complications).
+2. **Track Challenges**: Note when you encounter complex issues (e.g. tricky pointer errors in Go, container setup complications).
 3. **Brainstorm Public Content**: Keep an eye out for features or bug-fixes that would make excellent blog posts, video tutorials, or open-source code templates.
 
-### Step 4: Finalize and Compile Executive Summary
+*Note: If the background sidecar tracker is running, these updates are automatically compiled from your conversation transcript, but you should still manually customize the notes with extra depth when appropriate.*
+
+### Step 4: Finalize and Compile Session Index
 At key milestones during the session, or right before ending your turn:
 1. Update the active journal file (`session_<conversation_id>.md`) and set the `status` to `Completed` (if the session's objective has been achieved) or keep it `In-Progress`.
-2. Run the compiler script to automatically generate or update the master `executive_summary.md`:
+2. Run the compiler script to automatically generate or update the master `SESSION-INDEX.md`:
    ```bash
-   python3 <global_agent_directory>/skills/session-journal/scripts/summarize.py --workspace <workspace_path> --conv-id <conversation_id>
+   python3 .skills/session-journal/scripts/summarize.py --workspace <workspace_path> --conv-id <conversation_id>
    ```
-3. **Document Multi-Session Themes**: Open the compiled `executive_summary.md` and inspect the list of prior sessions. Identify long-running patterns, recurring bugs, or overarching architectural themes. Document these inside the protected comment boundaries under the **🎯 Multi-Session Themes & Consolidated Content** section:
-   ```markdown
-   <!-- START_CUSTOM_THEMES -->
-   ### Theme Title (e.g., Zero Compile Warning Initiative)
-   - **Pattern**: We solved compile warnings in session X, Y, and Z, leading to the creation of an automated policy.
-   - **Consolidated Blog Idea**: "From Chaos to Zero: Building an Automated Zero-Warning Policy in Monorepos"
-   <!-- END_CUSTOM_THEMES -->
-   ```
-   These comment boundaries tell the compiler daemon to preserve and carry over your manual theme logs completely intact when rebuilding the summary.
-4. Verify that the script runs successfully and lists your new session in the master directory.
+3. **Document Cross-Session Themes & Active Threads**: Open the compiled `SESSION-INDEX.md` and inspect the list of prior sessions. Identify long-running patterns, recurring bugs, or overarching architectural themes. Document these inside the protected comment boundaries under the **🎯 Cross-Session Themes** and **🔄 Active Threads** sections to preserve them across automated runs.
 
 ---
 
 ## 📝 Session Journal Template
 
-Use this exact structure for individual session markdown files (`.sessions/session_<conversation_id>.md`):
+Use this exact structure for individual session markdown files (`.local/sessions/session_<conversation_id>.md`):
 
 ```markdown
 ---
@@ -96,10 +89,13 @@ content_ideas:
 
 # 📓 Session Journal: <High-Level Session Title>
 
-## 🎯 Objective
+**Branch**: `<current git branch>`
+**Focus**: <one-line summary from the user's first message>
+
+## 🎯 Objective / Focus
 Describe the primary goal or issue that this session was created to address.
 
-## 🗺️ Key Discussions & Decisions
+## 🗺️ Key Chronology & Steps
 Provide a chronological or structured summary of what was discussed with the user, what decisions were made, and why:
 - **Decision A**: Detailed explanation of technical choices.
 - **Refactor B**: Why a specific file was cleaned up or redesigned.

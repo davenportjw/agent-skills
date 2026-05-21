@@ -42,12 +42,12 @@ def parse_frontmatter(content):
 
 def ensure_gitignore(workspace_dir):
     gitignore_path = os.path.join(workspace_dir, '.gitignore')
-    ignore_rule = '.sessions/'
+    ignore_rule = '.local/'
     
     if not os.path.exists(gitignore_path):
         print(f"Creating .gitignore at {gitignore_path}")
         with open(gitignore_path, 'w') as f:
-            f.write(f"# Session Journal\n{ignore_rule}\n")
+            f.write(f"# Local settings and Session Journal\n{ignore_rule}\n")
         return
     
     with open(gitignore_path, 'r') as f:
@@ -55,8 +55,8 @@ def ensure_gitignore(workspace_dir):
     
     # Check if already ignored
     patterns = [
-        r'^\.sessions/?$',
-        r'^\.sessions/\*$'
+        r'^\.local/?$',
+        r'^\.local/\*$'
     ]
     
     ignored = False
@@ -74,10 +74,10 @@ def ensure_gitignore(workspace_dir):
     if not ignored:
         print(f"Appending ignore rule to {gitignore_path}")
         with open(gitignore_path, 'a') as f:
-            f.write(f"\n# Session Journal\n{ignore_rule}\n")
+            f.write(f"\n# Local settings and Session Journal\n{ignore_rule}\n")
 
 def generate_executive_summary(workspace_dir):
-    sessions_dir = os.path.join(workspace_dir, '.sessions')
+    sessions_dir = os.path.join(workspace_dir, '.local', 'sessions')
     if not os.path.exists(sessions_dir):
         print(f"Sessions directory does not exist at {sessions_dir}")
         return
@@ -107,15 +107,22 @@ def generate_executive_summary(workspace_dir):
     sessions_data.sort(key=lambda x: (x.get('date', ''), x.get('id', '')), reverse=True)
     
     # Generate markdown
-    summary_path = os.path.join(sessions_dir, 'executive_summary.md')
+    summary_path = os.path.join(sessions_dir, 'SESSION-INDEX.md')
     
     custom_themes = "*No cross-session themes or multi-session content ideas have been consolidated yet. You can document long-running development themes, multi-session bug hunts, or overarching architectural shifts inside these HTML comment blocks to preserve them across updates.*"
+    active_threads = "- Ongoing work that spans multiple sessions"
+    
     if os.path.exists(summary_path):
         with open(summary_path, 'r') as f:
             old_content = f.read()
+        
         theme_match = re.search(r'<!-- START_CUSTOM_THEMES -->\s*(.*?)\s*<!-- END_CUSTOM_THEMES -->', old_content, re.DOTALL)
         if theme_match and theme_match.group(1).strip():
             custom_themes = theme_match.group(1).strip()
+            
+        threads_match = re.search(r'<!-- START_ACTIVE_THREADS -->\s*(.*?)\s*<!-- END_ACTIVE_THREADS -->', old_content, re.DOTALL)
+        if threads_match and threads_match.group(1).strip():
+            active_threads = threads_match.group(1).strip()
     
     # Count metrics
     total_sessions = len(sessions_data)
@@ -123,7 +130,7 @@ def generate_executive_summary(workspace_dir):
     in_progress_sessions = total_sessions - completed_sessions
     
     md = []
-    md.append("# Project Session Journal: Executive Summary")
+    md.append("# Session Journal Index")
     md.append("")
     md.append(f"*(Auto-generated from individual session journals. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} local time)*")
     md.append("")
@@ -147,6 +154,14 @@ def generate_executive_summary(workspace_dir):
         status_icon = "✅" if s.get('status', '').lower() == 'completed' else "🔄"
         session_link = f"[{s['id']}]({s['filename']})"
         md.append(f"| {s['date']} | {session_link} | **{s['title']}** | {status_icon} {s['status']} | {s['summary']} |")
+    md.append("")
+    
+    # Active Threads Section
+    md.append("## 🔄 Active Threads")
+    md.append("")
+    md.append("<!-- START_ACTIVE_THREADS -->")
+    md.append(active_threads)
+    md.append("<!-- END_ACTIVE_THREADS -->")
     md.append("")
     
     # Aggregated Challenges
@@ -183,6 +198,7 @@ def generate_executive_summary(workspace_dir):
     if not has_ideas:
         md.append("*No content opportunities identified yet.*")
         md.append("")
+        
     # Cross-session Themes Section
     md.append("## 🎯 Multi-Session Themes & Consolidated Content")
     md.append("")
@@ -194,15 +210,15 @@ def generate_executive_summary(workspace_dir):
     md.append("")
     
     md.append("---")
-    md.append("*To contribute or log a new session, create a file `.sessions/session_<id>.md` with YAML frontmatter and run the summarizer script.*")
+    md.append("*To contribute or log a new session, create a file `.local/sessions/session_<id>.md` with YAML frontmatter and run the summarizer script.*")
     
     with open(summary_path, 'w') as f:
         f.write('\n'.join(md))
     
-    print(f"Executive summary successfully generated/updated at {summary_path}")
+    print(f"Session Journal Index successfully generated/updated at {summary_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Compile session summaries and update .gitignore.")
+    parser = argparse.ArgumentParser(description="Compile session journal summaries and update .gitignore.")
     parser.add_argument("--workspace", required=True, help="Path to the active workspace/repository.")
     parser.add_argument("--conv-id", required=True, help="Current Active Conversation ID.")
     
@@ -214,10 +230,10 @@ def main():
         sys.exit(1)
         
     # Create sessions folder if missing
-    sessions_dir = os.path.join(workspace_dir, '.sessions')
+    sessions_dir = os.path.join(workspace_dir, '.local', 'sessions')
     os.makedirs(sessions_dir, exist_ok=True)
     
-    # Ensure gitignore contains .sessions/
+    # Ensure gitignore contains .local/
     ensure_gitignore(workspace_dir)
     
     # Regenerate executive summary

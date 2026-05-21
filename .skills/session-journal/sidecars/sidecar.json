@@ -2,6 +2,6 @@
   "command": "python3",
   "args": ["tracker.py"],
   "restart_policy": "always",
-  "description": "Continuously monitors active agent conversations to build and update session journals and executive summaries in real-time.",
-  "display_name": "Antigravity Session Tracker"
+  "description": "Continuously monitors active agent conversations to build and update session journals and rolling summaries in real-time under .local/sessions/.",
+  "display_name": "Antigravity Session Journal Tracker"
 }

@@ -45,19 +45,19 @@ def parse_frontmatter(content):
 
 def ensure_gitignore(workspace_dir):
     gitignore_path = os.path.join(workspace_dir, '.gitignore')
-    ignore_rule = '.sessions/'
+    ignore_rule = '.local/'
     
     if not os.path.exists(gitignore_path):
         with open(gitignore_path, 'w') as f:
-            f.write(f"# Session Journal\n{ignore_rule}\n")
+            f.write(f"# Local settings and Session Journal\n{ignore_rule}\n")
         return
     
     with open(gitignore_path, 'r') as f:
         content = f.read()
     
     patterns = [
-        r'^\.sessions/?$',
-        r'^\.sessions/\*$'
+        r'^\.local/?$',
+        r'^\.local/\*$'
     ]
     
     ignored = False
@@ -74,7 +74,7 @@ def ensure_gitignore(workspace_dir):
             
     if not ignored:
         with open(gitignore_path, 'a') as f:
-            f.write(f"\n# Session Journal\n{ignore_rule}\n")
+            f.write(f"\n# Local settings and Session Journal\n{ignore_rule}\n")
 
 def detect_workspace(transcript_lines):
     # Scan lines for file paths inside GitHub directory
@@ -186,7 +186,7 @@ def parse_transcript_to_session(transcript_path):
     return workspace, session_summary
 
 def update_session_files(workspace_dir, conv_id, summary_data):
-    sessions_dir = os.path.join(workspace_dir, '.sessions')
+    sessions_dir = os.path.join(workspace_dir, '.local', 'sessions')
     os.makedirs(sessions_dir, exist_ok=True)
     
     session_file = os.path.join(sessions_dir, f"session_{conv_id}.md")
@@ -197,8 +197,6 @@ def update_session_files(workspace_dir, conv_id, summary_data):
         with open(session_file, 'r') as f:
             existing_content = f.read()
             
-    # If there's existing manual content, don't completely overwrite manual sections
-    # We only update the frontmatter and structured logs, preserving the body if it was heavily customized
     metadata, body = parse_frontmatter(existing_content)
     
     title = metadata.get('title', summary_data['title'])
@@ -227,7 +225,7 @@ def update_session_files(workspace_dir, conv_id, summary_data):
     md.append("")
     md.append(f"# 📓 Session Journal: {title}")
     md.append("")
-    md.append("## 🎯 Objective")
+    md.append("## 🎯 Objective / Focus")
     md.append(summary_data['objective'])
     md.append("")
     md.append("## 🗺️ Key Chronology & Steps")
@@ -248,7 +246,7 @@ def update_session_files(workspace_dir, conv_id, summary_data):
         f.write('\n'.join(md))
 
 def generate_executive_summary(workspace_dir):
-    sessions_dir = os.path.join(workspace_dir, '.sessions')
+    sessions_dir = os.path.join(workspace_dir, '.local', 'sessions')
     session_files = [f for f in os.listdir(sessions_dir) if f.startswith('session_') and f.endswith('.md')]
     
     sessions_data = []
@@ -271,22 +269,29 @@ def generate_executive_summary(workspace_dir):
     
     sessions_data.sort(key=lambda x: (x.get('date', ''), x.get('id', '')), reverse=True)
     
-    summary_path = os.path.join(sessions_dir, 'executive_summary.md')
+    summary_path = os.path.join(sessions_dir, 'SESSION-INDEX.md')
     
     custom_themes = "*No cross-session themes or multi-session content ideas have been consolidated yet. You can document long-running development themes, multi-session bug hunts, or overarching architectural shifts inside these HTML comment blocks to preserve them across updates.*"
+    active_threads = "- Ongoing work that spans multiple sessions"
+    
     if os.path.exists(summary_path):
         with open(summary_path, 'r') as f:
             old_content = f.read()
+            
         theme_match = re.search(r'<!-- START_CUSTOM_THEMES -->\s*(.*?)\s*<!-- END_CUSTOM_THEMES -->', old_content, re.DOTALL)
         if theme_match and theme_match.group(1).strip():
             custom_themes = theme_match.group(1).strip()
+            
+        threads_match = re.search(r'<!-- START_ACTIVE_THREADS -->\s*(.*?)\s*<!-- END_ACTIVE_THREADS -->', old_content, re.DOTALL)
+        if threads_match and threads_match.group(1).strip():
+            active_threads = threads_match.group(1).strip()
             
     total_sessions = len(sessions_data)
     completed_sessions = sum(1 for s in sessions_data if s.get('status', '').lower() == 'completed')
     in_progress_sessions = total_sessions - completed_sessions
     
     md = []
-    md.append("# Project Session Journal: Executive Summary")
+    md.append("# Session Journal Index")
     md.append("")
     md.append(f"*(Auto-generated from background daemon. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} local time)*")
     md.append("")
@@ -307,6 +312,14 @@ def generate_executive_summary(workspace_dir):
         session_link = f"[{s['id']}]({s['filename']})"
         md.append(f"| {s['date']} | {session_link} | **{s['title']}** | {status_icon} {s['status']} | {s['summary']} |")
     md.append("")
+    
+    md.append("## 🔄 Active Threads")
+    md.append("")
+    md.append("<!-- START_ACTIVE_THREADS -->")
+    md.append(active_threads)
+    md.append("<!-- END_ACTIVE_THREADS -->")
+    md.append("")
+    
     md.append("## ⚠️ Key Technical Challenges & Solutions")
     md.append("")
     has_challenges = False
@@ -334,10 +347,8 @@ def generate_executive_summary(workspace_dir):
     if not has_ideas:
         md.append("*No content opportunities identified yet.*")
         md.append("")
-    # Cross-session Themes Section
+        
     md.append("## 🎯 Multi-Session Themes & Consolidated Content")
-    md.append("")
-    md.append("Here you can document overarching architectural shifts, long-running bug hunts, or development themes that span multiple individual sessions:")
     md.append("")
     md.append("<!-- START_CUSTOM_THEMES -->")
     md.append(custom_themes)
@@ -350,7 +361,7 @@ def generate_executive_summary(workspace_dir):
         f.write('\n'.join(md))
 
 def main():
-    print("Antigravity Session Tracker Daemon started.")
+    print("Antigravity Session Journal Tracker Daemon started.")
     sys.stdout.flush()
     
     processed_states = {}
@@ -377,7 +388,7 @@ def main():
                     
                 # File has changed, re-parse it
                 workspace_dir, summary_data = parse_transcript_to_session(transcript_path)
-                if workspace_dir and summary_data:
+                if workspace_dir and os.path.exists(workspace_dir) and summary_data:
                     ensure_gitignore(workspace_dir)
                     update_session_files(workspace_dir, conv_id, summary_data)
                     generate_executive_summary(workspace_dir)
