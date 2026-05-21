@@ -1,0 +1,100 @@
+# 🤖 Agent Skills: Developer-First Agentic Tooling
+
+Welcome to the **Agent Skills** repository! This is a curated collection of global skills, scripts, and sidecar configurations designed to supercharge your pair-programming experience with agentic AI coding assistants.
+
+These skills run **globally** inside your agent's App Data environment, enabling automated repository logging, workspace diagnostics, and developers-first workflows without polluting your codebase or Git history.
+
+---
+
+## 📓 Skill: `session-journal`
+
+The **Session Journal** skill automatically logs, tracks, and summarizes active coding sessions and discussions inside your workspace. It generates beautifully formatted local diaries for each session and maintains a master **Executive Summary** index showing key accomplishments, technical challenges resolved, and opportunities for public content (such as blog posts, videos, and open-source snippets).
+
+### Key Features
+* **Local-First Diaries**: Writes session notes inside a hidden `.antigravity/sessions/` folder located at your repository root.
+* **Automated Git Exclusions**: Configures and appends `.antigravity/` to your `.gitignore` file to keep your local notes secure and out of public source control.
+* **Continuous Tracking Daemon**: A background **Sidecar** daemon that watches your agent conversation logs and regenerates session journals and summaries in real-time (every 5 seconds).
+* **Multi-Session Content Themes**: Supports identifying and documenting long-term architectural themes, systemic pain points, or multi-session bug hunts inside protected HTML comment blocks that are preserved across automatic compiles.
+
+---
+
+## 📁 Repository Structure
+
+This repository is organized as follows:
+```text
+agent-skills/
+├── README.md
+└── session-journal/
+    ├── SKILL.md                  # Main instruction file loaded by the agent
+    ├── scripts/
+    │   └── summarize.py          # Python script to manually compile summaries
+    └── sidecars/
+        ├── sidecar.json          # Background sidecar configuration
+        └── tracker.py            # Python script running the continuous daemon
+```
+
+---
+
+## 🚀 Installation Guide
+
+To install and load these skills into your active coding assistant's global environment, copy the directories into your App Data Directory (e.g., `<global_agent_directory>`):
+
+### 1. Install the `session-journal` Skill
+Create a folder inside your global skills directory and copy the skill file and helper script:
+```bash
+# Create the global skill folder
+mkdir -p <global_agent_directory>/skills/session-journal/scripts
+
+# Copy the skill instructions
+cp session-journal/SKILL.md <global_agent_directory>/skills/session-journal/SKILL.md
+
+# Copy the summarizer script
+cp session-journal/scripts/summarize.py <global_agent_directory>/skills/session-journal/scripts/summarize.py
+chmod +x <global_agent_directory>/skills/session-journal/scripts/summarize.py
+```
+
+### 2. Install the Continuous Background Sidecar Daemon
+Create a folder inside your global sidecars directory and copy the sidecar configuration and daemon:
+```bash
+# Create the global sidecar folder
+mkdir -p <global_agent_directory>/sidecars/session_tracker
+
+# Copy sidecar configuration
+cp session-journal/sidecars/sidecar.json <global_agent_directory>/sidecars/session_tracker/sidecar.json
+
+# Copy daemon script
+cp session-journal/sidecars/tracker.py <global_agent_directory>/sidecars/session_tracker/tracker.py
+chmod +x <global_agent_directory>/sidecars/session_tracker/tracker.py
+```
+
+Once these files are copied, the background daemon will automatically start running and monitoring all active workspaces, and coding assistants will immediately load the journal-keeping instructions!
+
+---
+
+## 📖 Usage & Workflow
+
+### Manual Summarization
+If you prefer not to run the background daemon, or want to force an immediate compile, run the script manually from the root of your workspace:
+```bash
+python3 <global_agent_directory>/skills/session-journal/scripts/summarize.py --workspace <workspace_path> --conv-id <conversation_id>
+```
+
+### Multi-Session Content Themes
+To document development themes or blog post ideas spanning multiple individual sessions (such as resolving a complex database race condition over three days):
+1. Open your workspace's compiled `.antigravity/sessions/executive_summary.md`.
+2. Locate the **Multi-Session Themes** section.
+3. Edit and write your thoughts inside the `<!-- START_CUSTOM_THEMES -->` and `<!-- END_CUSTOM_THEMES -->` comment boundaries:
+   ```markdown
+   <!-- START_CUSTOM_THEMES -->
+   ### ⚡ Theme: High-Throughput Priority Queue Buffering
+   * **Sessions**: session_abc, session_def
+   * **Overview**: Solved buffer queue issues under high load and comparison of Org vs App rate-limit.
+   * **Blog Opportunity**: "Rate Limiting and Priority Queue Request Scheduling"
+   <!-- END_CUSTOM_THEMES -->
+   ```
+4. Any updates generated by the background tracker or summarizer script will automatically parse, preserve, and carry over this text!
+
+---
+
+## 📄 License
+This collection of skills is released under the **Apache-2.0 License**. Feel free to fork, modify, and share them with your teams!
