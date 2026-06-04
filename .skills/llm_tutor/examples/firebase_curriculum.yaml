@@ -1,0 +1,1289 @@
+curriculum_id: firebase_platform_mastery
+version: '1.0'
+description: A comprehensive guide to mastering the Firebase platform, from setup
+  to advanced AI integrations.
+skills:
+- id: terminal_basics
+  title: Terminal Basics
+  category: firebase_platform
+  dependencies: []
+  description: Learning how to navigate directories, list files, and execute scripts
+    using a command-line interface (CLI).
+  fast_track_assessment: Briefly explain how to navigate directories, list files,
+    and execute scripts using a command line.
+  verification:
+    type: multiple_choice
+    question: "Which command is used to create a new directory in most terminals?"
+    options:
+      - id: ls
+        text: "ls"
+      - id: cd
+        text: "cd"
+      - id: mkdir
+        text: "mkdir"
+      - id: touch
+        text: "touch"
+    correct_answer_id: mkdir
+- id: json_fundamentals
+  title: JSON Fundamentals
+  category: firebase_platform
+  dependencies: []
+  description: Understanding the syntax and structure of JSON for data representation,
+    including nesting and data types.
+  fast_track_assessment: Briefly explain JSON Fundamentals and how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a valid JSON object without syntax errors.
+- id: asynchronous_javascript_promises_async_await
+  title: Asynchronous JavaScript (Promises/Async-Await)
+  category: firebase_platform
+  dependencies:
+  - id: terminal_basics
+    type: hard
+  description: Mastering non-blocking code execution patterns required for network-based
+    database calls.
+  fast_track_assessment: Briefly explain Asynchronous JavaScript (Promises/Async-Await)
+    and how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain how code continues execution while waiting
+      for a network response.
+- id: http_basics_and_rest_concepts
+  title: HTTP Basics and REST Concepts
+  category: firebase_platform
+  dependencies:
+  - id: json_fundamentals
+    type: hard
+  description: Understanding the request/response lifecycle, status codes, and HTTP
+    methods (GET, POST, etc).
+  fast_track_assessment: Briefly explain HTTP Basics and REST Concepts and how it
+    relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can identify the difference between client-side errors
+      (4xx) and server-side errors (5xx).
+- id: git_and_version_control
+  title: Git and Version Control
+  category: firebase_platform
+  dependencies:
+  - id: terminal_basics
+    type: hard
+  description: Setting up local and remote repositories to track changes and collaborate
+    on code.
+  fast_track_assessment: Briefly explain Git and Version Control and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can perform a git commit and push to a remote repository.
+- id: node_js_and_npm_installation
+  title: Node.js and NPM Installation
+  category: firebase_platform
+  dependencies:
+  - id: terminal_basics
+    type: hard
+  description: Installing the JavaScript runtime and package manager required to run
+    Firebase tools and libraries.
+  fast_track_assessment: Briefly explain Node.js and NPM Installation and how it relates
+    to Firebase.
+  verification:
+    type: command_check
+    command: "node -v"
+    expected_output: "regex:^v[0-9]+\\.[0-9]+\\.[0-9]+"
+- id: identity_and_access_management_iam_concepts
+  title: Identity and Access Management (IAM) Concepts
+  category: firebase_platform
+  dependencies:
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: Conceptual understanding of Principals, Roles, and Permissions in cloud
+    environments.
+  fast_track_assessment: Briefly explain Identity and Access Management (IAM) Concepts
+    and how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the 'Principle of Least Privilege'.
+- id: google_account_creation
+  title: Google Account Creation
+  category: firebase_platform
+  dependencies: []
+  description: Establishing a primary identity to manage Google Cloud and Firebase
+    resources.
+  fast_track_assessment: Briefly explain Google Account Creation and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: Access to the Google/Firebase Console is granted.
+- id: firebase_project_creation
+  title: Firebase Project Creation
+  category: firebase_platform
+  dependencies:
+  - id: google_account_creation
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: 'Provisioning a unique project container in the Firebase Console. [Achievement:
+    The Founder]'
+  fast_track_assessment: Briefly explain Firebase Project Creation and how it relates
+    to Firebase.
+  verification:
+    type: mcp_check
+    mcp_server: "firebase-mcp-server"
+    mcp_tool: "firebase_get_project"
+    arguments: {}
+    expected_result_field: "projectId"
+    expected_value: "ANY"
+- id: firebase_console_navigation
+  title: Firebase Console Navigation
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: Learning the layout of the project dashboard, including settings, usage,
+    and product lists.
+  fast_track_assessment: Briefly explain Firebase Console Navigation and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the 'Blaze Plan' upgrade button and API
+      keys.
+- id: firebase_cli_installation
+  title: Firebase CLI Installation
+  category: firebase_platform
+  dependencies:
+  - id: node_js_and_npm_installation
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: Installing the firebase-tools package globally on the local machine.
+  fast_track_assessment: Briefly explain Firebase CLI Installation and how it relates
+    to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: Command 'firebase --version' returns a version number.
+- id: firebase_cli_login
+  title: Firebase CLI Login
+  category: firebase_platform
+  dependencies:
+  - id: firebase_cli_installation
+    type: hard
+  - id: google_account_creation
+    type: hard
+  - id: terminal_basics
+    type: hard
+  description: Authenticating the terminal session with the Google Account to allow
+    local deployment.
+  fast_track_assessment: Briefly explain Firebase CLI Login and how it relates to
+    Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: The command 'firebase login' displays 'Already logged in'.
+- id: firebase_project_initialization
+  title: Firebase Project Initialization
+  category: firebase_platform
+  dependencies:
+  - id: firebase_cli_login
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: Linking a local folder to a Firebase project via 'firebase init'.
+  fast_track_assessment: Briefly explain Firebase Project Initialization and how it
+    relates to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: A '.firebaserc' and 'firebase.json' file are created.
+- id: web_app_registration
+  title: Web App Registration
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: firebase_console_navigation
+    type: hard
+  description: Registering a specific application instance within the project to get
+    config keys.
+  fast_track_assessment: Briefly explain Web App Registration and how it relates to
+    Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The configuration object (apiKey, appId) is visible in settings.
+- id: firebase_sdk_installation
+  title: Firebase SDK Installation
+  category: firebase_platform
+  dependencies:
+  - id: node_js_and_npm_installation
+    type: hard
+  - id: firebase_project_initialization
+    type: hard
+  description: Adding the core Firebase library to your specific application project.
+  fast_track_assessment: Briefly explain Firebase SDK Installation and how it relates
+    to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: The 'firebase' package appears in package.json.
+- id: firebase_app_initialization_in_code
+  title: Firebase App Initialization in Code
+  category: firebase_platform
+  dependencies:
+  - id: firebase_sdk_installation
+    type: hard
+  - id: web_app_registration
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: 'Using ''initializeApp()'' in the source code to connect to the backend.
+    [Achievement: Hello World]'
+  fast_track_assessment: Briefly explain Firebase App Initialization in Code and how
+    it relates to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: The app starts without 'No Firebase App created' errors.
+- id: auth_console_configuration
+  title: Auth Console Configuration
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: firebase_console_navigation
+    type: hard
+  description: Enabling the Authentication service within the Firebase dashboard.
+  fast_track_assessment: Briefly explain Auth Console Configuration and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The 'Users' tab is enabled and accessible.
+- id: auth_email_password_setup
+  title: Auth Email/Password Setup
+  category: firebase_platform
+  dependencies:
+  - id: auth_console_configuration
+    type: hard
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: Enabling the Email/Password sign-in provider in the dashboard.
+  fast_track_assessment: Briefly explain Auth Email/Password Setup and how it relates
+    to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: Email provider is listed as 'Enabled'.
+- id: auth_user_registration
+  title: Auth User Registration
+  category: firebase_platform
+  dependencies:
+  - id: firebase_app_initialization_in_code
+    type: hard
+  - id: auth_email_password_setup
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: 'Implementing the ''createUserWithEmailAndPassword'' code logic. [Achievement:
+    The Gatekeeper]'
+  fast_track_assessment: Briefly explain Auth User Registration and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: A new user entry appears in the Auth 'Users' table.
+- id: auth_user_login
+  title: Auth User Login
+  category: firebase_platform
+  dependencies:
+  - id: auth_user_registration
+    type: hard
+  - id: json_fundamentals
+    type: hard
+  description: Implementing 'signInWithEmailAndPassword' to authenticate existing
+    users.
+  fast_track_assessment: Briefly explain Auth User Login and how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: A user object is returned and stored in local memory.
+- id: auth_state_listener
+  title: Auth State Listener
+  category: firebase_platform
+  dependencies:
+  - id: firebase_app_initialization_in_code
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: Using 'onAuthStateChanged' to monitor login/logout events.
+  fast_track_assessment: Briefly explain Auth State Listener and how it relates to
+    Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The UI updates dynamically when sign-in state changes.
+- id: auth_google_sign_in_setup
+  title: Auth Google Sign-In Setup
+  category: firebase_platform
+  dependencies:
+  - id: auth_console_configuration
+    type: hard
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: 'Configuring OAuth credentials and redirect URIs for Google Auth. [Achievement:
+    Social Butterfly]'
+  fast_track_assessment: Briefly explain Auth Google Sign-In Setup and how it relates
+    to Firebase.
+  verification:
+    type: environment_health_check
+    instructions_to_user: Users can sign in using a Google account popup.
+- id: firestore_nosql_data_modeling
+  title: 'Firestore: NoSQL Data Modeling'
+  category: firebase_platform
+  dependencies:
+  - id: json_fundamentals
+    type: hard
+  - id: firebase_console_navigation
+    type: hard
+  description: Learning to structure data in documents and collections rather than
+    tables.
+  fast_track_assessment: 'Briefly explain Firestore: NoSQL Data Modeling and how it
+    relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can draw a schema showing document-subcollection hierarchy.
+- id: firestore_instance_creation
+  title: Firestore Instance Creation
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: firestore_nosql_data_modeling
+    type: hard
+  description: 'Initializing the database and setting its geographic location. [Achievement:
+    The Architect]'
+  fast_track_assessment: Briefly explain Firestore Instance Creation and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The database is ready and the 'Data' tab is visible.
+- id: firestore_document_creation_setdoc
+  title: Firestore Document Creation (setDoc)
+  category: firebase_platform
+  dependencies:
+  - id: firebase_app_initialization_in_code
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: Writing data to a specific document ID in a collection.
+  fast_track_assessment: Briefly explain Firestore Document Creation (setDoc) and
+    how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: Data is visible in the console at the chosen ID.
+- id: firestore_auto_id_creation_adddoc
+  title: Firestore Auto-ID Creation (addDoc)
+  category: firebase_platform
+  dependencies:
+  - id: firestore_instance_creation
+    type: hard
+  - id: firestore_document_creation_setdoc
+    type: hard
+  description: Adding documents where Firestore generates a unique ID.
+  fast_track_assessment: Briefly explain Firestore Auto-ID Creation (addDoc) and how
+    it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: A new document appears with a random string ID.
+- id: firestore_collection_queries_getdocs
+  title: Firestore Collection Queries (getDocs)
+  category: firebase_platform
+  dependencies:
+  - id: firestore_auto_id_creation_adddoc
+    type: hard
+  - id: json_fundamentals
+    type: hard
+  description: 'Retrieving multiple documents using filters and limiters. [Achievement:
+    Data Whisperer]'
+  fast_track_assessment: Briefly explain Firestore Collection Queries (getDocs) and
+    how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: An array of document data is printed to the console.
+- id: firestore_real_time_listeners_onsnapshot
+  title: Firestore Real-time Listeners (onSnapshot)
+  category: firebase_platform
+  dependencies:
+  - id: firebase_app_initialization_in_code
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: 'Subscribing to live data changes without refreshing. [Achievement:
+    Live Wire]'
+  fast_track_assessment: Briefly explain Firestore Real-time Listeners (onSnapshot)
+    and how it relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The UI updates immediately when a value changes in the console.
+- id: firestore_composite_indexing
+  title: Firestore Composite Indexing
+  category: firebase_platform
+  dependencies:
+  - id: firestore_collection_queries_getdocs
+    type: hard
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: Enabling complex queries across multiple document fields.
+  fast_track_assessment: Briefly explain Firestore Composite Indexing and how it relates
+    to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: A query involving multiple 'where' and 'orderBy' clauses
+      succeeds.
+- id: security_rules_basic_syntax
+  title: 'Security Rules: Basic Syntax'
+  category: firebase_platform
+  dependencies:
+  - id: firestore_instance_creation
+    type: hard
+  - id: json_fundamentals
+    type: hard
+  description: Learning the logic of the 'match' and 'allow' statements.
+  fast_track_assessment: 'Briefly explain Security Rules: Basic Syntax and how it
+    relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: Rules deploy via CLI without errors.
+- id: security_rules_auth_checks
+  title: 'Security Rules: Auth Checks'
+  category: firebase_platform
+  dependencies:
+  - id: security_rules_basic_syntax
+    type: hard
+  - id: auth_console_configuration
+    type: hard
+  - id: auth_state_listener
+    type: hard
+  description: 'Using ''request.auth'' to secure data based on identity. [Achievement:
+    The Protector]'
+  fast_track_assessment: 'Briefly explain Security Rules: Auth Checks and how it relates
+    to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: Logged-out users are blocked from reading protected collections.
+- id: security_rules_unit_testing
+  title: 'Security Rules: Unit Testing'
+  category: firebase_platform
+  dependencies:
+  - id: security_rules_basic_syntax
+    type: hard
+  - id: emulator_suite_local_firestore
+    type: hard
+  - id: terminal_basics
+    type: hard
+  description: Writing local tests to verify security logic without deploying.
+  fast_track_assessment: 'Briefly explain Security Rules: Unit Testing and how it
+    relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: Tests show red for unauthorized access and green for authorized.
+- id: cloud_storage_file_uploading
+  title: 'Cloud Storage: File Uploading'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_app_initialization_in_code
+    type: hard
+  - id: asynchronous_javascript_promises_async_await
+    type: hard
+  description: 'Implementing ''uploadBytes'' for images, videos, or documents. [Achievement:
+    Content King]'
+  fast_track_assessment: 'Briefly explain Cloud Storage: File Uploading and how it
+    relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: Files appear in the Storage 'Files' dashboard.
+- id: cloud_functions_env_setup
+  title: 'Cloud Functions: Env Setup'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_initialization
+    type: hard
+  - id: node_js_and_npm_installation
+    type: hard
+  description: Initializing the local backend environment.
+  fast_track_assessment: 'Briefly explain Cloud Functions: Env Setup and how it relates
+    to Firebase.'
+  verification:
+    type: environment_health_check
+    instructions_to_user: A 'functions' folder with 'index.js' is created.
+- id: cloud_functions_deployment
+  title: 'Cloud Functions: Deployment'
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_env_setup
+    type: hard
+  - id: firebase_cli_login
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: 'Uploading code to Google''s servers via CLI. [Achievement: Cloud Runner]'
+  fast_track_assessment: 'Briefly explain Cloud Functions: Deployment and how it relates
+    to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: The function URL is active and return data.
+- id: firebase_hosting_basic_deployment
+  title: 'Firebase Hosting: Basic Deployment'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_initialization
+    type: hard
+  - id: terminal_basics
+    type: hard
+  description: 'Pushing static assets to the Firebase CDN. [Achievement: Web Master]'
+  fast_track_assessment: 'Briefly explain Firebase Hosting: Basic Deployment and how
+    it relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: The site is reachable at project.web.app.
+- id: firestore_offline_persistence
+  title: Firestore Offline Persistence
+  category: firebase_platform
+  dependencies:
+  - id: firestore_instance_creation
+    type: hard
+  - id: firestore_nosql_data_modeling
+    type: hard
+  description: 'Enabling local caching for low-connectivity environments. [Achievement:
+    Offline Warrior]'
+  fast_track_assessment: Briefly explain Firestore Offline Persistence and how it
+    relates to Firebase.
+  verification:
+    type: llm_rubric
+    instructions_to_user: The app displays data while the device is in airplane mode.
+- id: crashlytics_installation
+  title: 'Crashlytics: Installation'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: 'Integrating real-time crash reporting into the app. [Achievement:
+    Bug Hunter]'
+  fast_track_assessment: 'Briefly explain Crashlytics: Installation and how it relates
+    to Firebase.'
+  verification:
+    type: environment_health_check
+    instructions_to_user: A forced crash appears in the Firebase dashboard logs.
+- id: firebase_genkit_ai_flows
+  title: 'Firebase Genkit: AI Flows'
+  category: firebase_platform
+  dependencies:
+  - id: node_js_and_npm_installation
+    type: hard
+  - id: cloud_functions_env_setup
+    type: hard
+  - id: http_basics_and_rest_concepts
+    type: hard
+  description: 'Creating structured AI logic and LLM integrations. [Achievement: AI
+    Vanguard]'
+  fast_track_assessment: 'Briefly explain Firebase Genkit: AI Flows and how it relates
+    to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: The flow returns an AI-generated result.
+- id: emulator_suite_local_firestore
+  title: 'Emulator Suite: Local Firestore'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_initialization
+    type: hard
+  - id: terminal_basics
+    type: hard
+  description: Setting up local database emulation for development and testing.
+  fast_track_assessment: 'Briefly explain Emulator Suite: Local Firestore and how
+    it relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: Database runs locally at localhost:8080.
+- id: administrative_billing_alerts
+  title: 'Administrative: Billing Alerts'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: firebase_console_navigation
+    type: hard
+  description: 'Configuring thresholds to monitor project costs. [Achievement: Master
+    of the Blaze]'
+  fast_track_assessment: 'Briefly explain Administrative: Billing Alerts and how it
+    relates to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: An alert is active in the Billing Console.
+- id: administrative_iam_roles
+  title: 'Administrative: IAM Roles'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: identity_and_access_management_iam_concepts
+    type: hard
+  description: 'Assigning granular permissions to team members. [Achievement: The
+    Commander]'
+  fast_track_assessment: 'Briefly explain Administrative: IAM Roles and how it relates
+    to Firebase.'
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can refactor a repetitive rule into a single 'isSignedIn()'
+      function.
+- id: extensions_discovery_install
+  title: Discovering & Installing Extensions
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Learning to browse the Firebase Extensions hub and configure pre-built
+    solutions for common tasks.
+  fast_track_assessment: Briefly explain how to install a Firebase Extension.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the Extensions menu in the console.
+- id: extensions_environments
+  title: Extension Environments & Config
+  category: firebase_platform
+  dependencies:
+  - id: extensions_discovery_install
+    type: hard
+  description: Managing configuration parameters and environment variables for different
+    project stages (dev vs. prod).
+  fast_track_assessment: How do you update the configuration of an installed extension?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can identifying the 'Extension Configuration' tab.
+- id: extension_resize_images
+  title: 'Extensions: Resize Images'
+  category: firebase_platform
+  dependencies:
+  - id: extensions_discovery_install
+    type: hard
+  - id: cloud_storage_file_uploading
+    type: hard
+  description: Automating media optimization by automatically resizing images uploaded
+    to Storage.
+  fast_track_assessment: What event triggers the 'Resize Images' extension?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can see resized image variants in the Storage bucket.
+- id: extension_trigger_email
+  title: 'Extensions: Trigger Email'
+  category: firebase_platform
+  dependencies:
+  - id: extensions_discovery_install
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  description: Implementing transactional emails by writing documents to a specific
+    Firestore collection.
+  fast_track_assessment: How does the Trigger Email extension know when to send an
+    email?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a 'mail' document and verify an email is
+      sent.
+- id: extension_stripe_payments
+  title: 'Extensions: Payments with Stripe'
+  category: firebase_platform
+  dependencies:
+  - id: extensions_discovery_install
+    type: hard
+  - id: auth_user_registration
+    type: hard
+  description: Integrating secure checkout flows and subscription management via the
+    official Stripe extension.
+  fast_track_assessment: Where is the Stripe API key stored when using this extension?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the redirection flow to the Stripe Customer
+      Portal.
+- id: extension_algolia_search
+  title: 'Extensions: Search with Algolia'
+  category: firebase_platform
+  dependencies:
+  - id: extensions_discovery_install
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  description: Maintaining a full-text search index by automatically syncing Firestore
+    data to Algolia.
+  fast_track_assessment: Does Algolia replace Firestore for data storage?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can perform a search in Algolia and see synced Firestore
+      data.
+- id: data_connect_architecture
+  title: Data Connect Architecture
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Understanding the PostgreSQL-backed SQL engine of Firebase Data Connect.
+  fast_track_assessment: What database technology powers Firebase Data Connect?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the difference between Firestore (NoSQL)
+      and Data Connect (SQL).
+- id: data_connect_graphql_schema
+  title: 'Data Connect: GraphQL Schema'
+  category: firebase_platform
+  dependencies:
+  - id: data_connect_architecture
+    type: hard
+  description: Defining tables, relations, and primary keys using GraphQL Schema Definition
+    Language (SDL).
+  fast_track_assessment: How do you define a table in Data Connect?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a valid `@table` definition in a .gql file.
+- id: data_connect_queries_mutations
+  title: 'Data Connect: Queries & Mutations'
+  category: firebase_platform
+  dependencies:
+  - id: data_connect_graphql_schema
+    type: hard
+  description: Writing SQL-equivalent data access logic using GraphQL queries and
+    mutations.
+  fast_track_assessment: What is the GraphQL equivalent of a SQL 'UPDATE' statement?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a mutation to insert a new row into a table.
+- id: data_connect_sdk_generation
+  title: 'Data Connect: SDK Generation'
+  category: firebase_platform
+  dependencies:
+  - id: data_connect_queries_mutations
+    type: hard
+  - id: firebase_sdk_installation
+    type: hard
+  description: Generating strongly-typed local SDKs for web/mobile apps directly from
+    Data Connect schemas.
+  fast_track_assessment: What is the benefit of using the generated SDK over raw GraphQL
+    calls?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can run 'firebase dataconnect:sdk:generate'.
+- id: vertex_ai_config
+  title: Vertex AI SDK Configuration
+  category: firebase_platform
+  dependencies:
+  - id: firebase_genkit_ai_flows
+    type: hard
+  - id: auth_console_configuration
+    type: hard
+  description: Initializing the Gemini models within a Firebase context and managing
+    project permissions.
+  fast_track_assessment: Which Google Cloud service provides the LLMs for Firebase?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can successfully initialize the Vertex AI SDK in code.
+- id: vertex_ai_system_instructions
+  title: 'Vertex AI: System Instructions'
+  category: firebase_platform
+  dependencies:
+  - id: vertex_ai_config
+    type: hard
+  description: Crafting system prompts to strictly control AI personality, response
+    format, and constraints.
+  fast_track_assessment: What is the difference between a system instruction and a
+    user prompt?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can create a prompt that forces the AI to only respond
+      in JSON.
+- id: vertex_ai_multimodal
+  title: 'Vertex AI: Multi-modal Inputs'
+  category: firebase_platform
+  dependencies:
+  - id: vertex_ai_config
+    type: hard
+  - id: cloud_storage_file_uploading
+    type: hard
+  description: Processing images, videos, and text together in a single AI inference
+    call.
+  fast_track_assessment: Can Gemini process a video file stored in Cloud Storage?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can send a sample image URL to the model for analysis.
+- id: vertex_ai_grounding
+  title: 'Vertex AI: Grounding'
+  category: firebase_platform
+  dependencies:
+  - id: vertex_ai_config
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  description: Connecting the LLM to real-time data sources like Google Search or
+    your own Firestore data.
+  fast_track_assessment: What is 'hallucination' and how does grounding help prevent
+    it?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain how to include Firestore context in an
+      AI prompt.
+- id: vertex_ai_safety_settings
+  title: 'Vertex AI: Safety Settings'
+  category: firebase_platform
+  dependencies:
+  - id: vertex_ai_config
+    type: hard
+  description: Configuring toxicity filters, hate speech detection, and safety thresholds
+    for AI responses.
+  fast_track_assessment: How do safety settings affect the 'harassment' threshold?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can set a 'BLOCK_MOST' threshold for a safety category.
+- id: rtdb_json_modeling
+  title: 'RTDB: JSON Tree Modeling'
+  category: firebase_platform
+  dependencies:
+  - id: firestore_nosql_data_modeling
+    type: hard
+  description: Structuring data for the original Realtime Database NoSQL engine.
+  fast_track_assessment: How is the structure of RTDB different from Firestore?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can draw a JSON tree for a simple message list.
+- id: rtdb_security_rules
+  title: 'RTDB: Security Rules'
+  category: firebase_platform
+  dependencies:
+  - id: rtdb_json_modeling
+    type: hard
+  description: Mastering the distinct .read, .write, and .validate syntax of RTDB
+    security rules.
+  fast_track_assessment: What does the '.validate' rule do in RTDB?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a rule that prevents writing data longer
+      than 100 characters.
+- id: rtdb_data_flattening
+  title: 'RTDB: Data Flattening'
+  category: firebase_platform
+  dependencies:
+  - id: rtdb_json_modeling
+    type: hard
+  description: Architectural patterns to avoid deep nesting and perform efficient
+    data retrieval in RTDB.
+  fast_track_assessment: Why is deep nesting bad for performance in RTDB?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain how to use "index-like" keys to link data.
+- id: rtdb_vs_firestore
+  title: RTDB vs Firestore
+  category: firebase_platform
+  dependencies:
+  - id: rtdb_json_modeling
+    type: hard
+  - id: firestore_nosql_data_modeling
+    type: hard
+  description: Knowing when to choose the ultra-low latency of RTDB over the flexible
+    querying of Firestore.
+  fast_track_assessment: Which database is better for a high-frequency real-time game
+    state?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can list three use cases where RTDB is superior to
+      Firestore.
+- id: auth_identity_platform_upgrade
+  title: Identity Platform Upgrade
+  category: firebase_platform
+  dependencies:
+  - id: auth_console_configuration
+    type: hard
+  description: Enabling enterprise features like SAML, OIDC, and multi-tenancy.
+  fast_track_assessment: What is a major benefit of upgrading to Google Cloud Identity
+    Platform?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the upgrade button in the Auth console.
+- id: auth_mfa_implementation
+  title: Multi-Factor Authentication (MFA)
+  category: firebase_platform
+  dependencies:
+  - id: auth_identity_platform_upgrade
+    type: hard
+  description: Implementing SMS-based second-factor logic for enhanced account security.
+  fast_track_assessment: Briefly explain the user flow for MFA enrollment.
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the difference between MFA and simple two-step
+      verification.
+- id: auth_account_linking
+  title: Auth Account Linking
+  category: firebase_platform
+  dependencies:
+  - id: auth_user_registration
+    type: hard
+  description: Merging multiple auth providers (e.g., Google + Email) into a single
+    user identity (UID).
+  fast_track_assessment: What happens to the UID when you link a new provider to an
+    existing account?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the 'linkWithPopup' code flow.
+- id: auth_blocking_functions
+  title: Auth Blocking Functions
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_deployment
+    type: hard
+  - id: auth_identity_platform_upgrade
+    type: hard
+  description: Using synchronous Cloud Functions to block or modify registration and
+    sign-in at runtime.
+  fast_track_assessment: When is a blocking function executed relative to the user
+    being created?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a function that only allows emails from a
+      specific domain.
+- id: cloud_functions_vpc_networking
+  title: 'Functions: VPC Networking'
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_deployment
+    type: hard
+  description: Connecting Cloud Functions to internal VPC resources like Cloud SQL
+    or Redis.
+  fast_track_assessment: What is a VPC Connector?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the egress settings in the Cloud Console.
+- id: cloud_functions_idempotency
+  title: 'Functions: Idempotency'
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_background_triggers
+    type: hard
+  description: Patterns to ensure background triggers (like Firestore onWrite) handle
+    retries gracefully without duplicate side effects.
+  fast_track_assessment: Why might a Firebase background trigger run twice for the
+    same event?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the use of a "processed_events" collection
+      in Firestore.
+- id: functions_secrets_manager
+  title: 'Functions: Secrets Manager Integration'
+  category: firebase_platform
+  dependencies:
+  - id: env_vars_and_secrets
+    type: hard
+  - id: cloud_functions_deployment
+    type: hard
+  description: Securely injecting API keys and tokens into Cloud Functions using the
+    Google Cloud Secret Manager integration.
+  fast_track_assessment: How is a Secret different from an Environment Variable in
+    Functions config?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can define a secret dependency in the 'runWith' options.
+- id: cloud_functions_concurrency
+  title: 'Functions: Concurrency'
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_deployment
+    type: hard
+  description: Tuning function instances to handle multiple simultaneous requests,
+    reducing cold starts and cost.
+  fast_track_assessment: What is the benefit of increasing concurrency settings?
+  verification:
+    type: llm_rubric
+    instructions_to_user: 'User can set ''concurrency: 80'' in a function definition.'
+- id: performance_custom_traces
+  title: Performance Custom Traces
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Measuring the duration of specific code paths (e.g., image processing)
+    within your application.
+  fast_track_assessment: How do you start and stop a custom performance trace in code?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain 'perf.trace(name).start()'.
+- id: performance_alerting_webhooks
+  title: Performance Alerting & Webhooks
+  category: firebase_platform
+  dependencies:
+  - id: performance_custom_traces
+    type: hard
+  description: Automating notifications via Slack or email when latency or crash rates
+    exceed thresholds.
+  fast_track_assessment: Where do you configure performance thresholds?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the 'Alerting' tab in the Performance dashboard.
+- id: analytics_bigquery_export
+  title: Analytics BigQuery Export
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Exporting raw analytics data to BigQuery for complex data analysis
+    that exceeds the Firebase dashboard.
+  fast_track_assessment: Is the BigQuery export real-time or daily?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the BigQuery linking settings in the Project
+      Settings.
+- id: compliance_data_export
+  title: 'Compliance: Data Export/Deletion'
+  category: firebase_platform
+  dependencies:
+  - id: auth_user_registration
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  description: Implementing GDPR/CCPA compliant flows for user data export and account
+    deletion.
+  fast_track_assessment: What is the "Right to Erasure"?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can design a function that deletes all user data from
+      Storage and Firestore on account deletion.
+- id: firebase_test_lab_intro
+  title: Firebase Test Lab
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Running automated and manual tests on a wide range of physical and
+    virtual Android and iOS devices.
+  fast_track_assessment: What is a "Robo Test"?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the difference between a physical and virtual
+      device in Test Lab.
+- id: ops_multiple_environments
+  title: 'Ops: Multiple Environments'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_initialization
+    type: hard
+  description: Managing separate project IDs for development, staging, and production
+    using the .firebaserc file.
+  fast_track_assessment: How do you switch the active project alias in the CLI?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can list aliases using 'firebase use'.
+- id: remote_config_personalization
+  title: Remote Config Personalization
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Using machine learning to automatically serve the most effective config
+    values to specific user segments.
+  fast_track_assessment: How does personalization differ from simple conditional targeting?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain "optimization objectives" in Remote Config.
+- id: app_distribution_groups
+  title: 'App Distribution: Release Groups'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Managing beta testers, distribution groups, and release notes for pre-store
+    application testing.
+  fast_track_assessment: How do you invite a tester to a specific group?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate the 'Testers & Groups' tab in the console.
+- id: admin_cost_controls
+  title: 'Admin: Cost & Usage Controls'
+  category: firebase_platform
+  dependencies:
+  - id: administrative_billing_alerts
+    type: hard
+  description: Setting granular limits on API usage or function instances to prevent
+    unexpected billing spikes.
+  fast_track_assessment: Can you set a hard cap on Firestore read operations?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the difference between a billing alert
+      and a quota limit.
+- id: admin_gcp_console_interop
+  title: 'Admin: GCP Console Interoperability'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  description: Navigating the Google Cloud side of your Firebase project for advanced
+    networking and IAM settings.
+  fast_track_assessment: Is every Firebase project also a Google Cloud project?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can locate their Firebase project in the Google Cloud
+      Console.
+- id: admin_advanced_iam_roles
+  title: 'Admin: Advanced IAM Roles'
+  category: firebase_platform
+  dependencies:
+  - id: administrative_iam_roles
+    type: hard
+  description: Managing complex permissions and performing access reviews for large
+    teams.
+  fast_track_assessment: What is a "Custom Role"?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the risk of assigning the 'Owner' role
+      vs 'Editor'.
+- id: admin_resource_cleanup
+  title: 'Admin: Resource Cleanup & Automation'
+  category: firebase_platform
+  dependencies:
+  - id: firebase_cli_installation
+    type: hard
+  description: Using scripts and CLI commands to prune old backups, temporary emulator
+    data, and unused resources.
+  fast_track_assessment: Why is resource cleanup important for development velocity?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a simple shell script to clear local emulator
+      logs.
+- id: env_vars_and_secrets
+  title: Environment Variables and Secrets
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_initialization
+    type: hard
+  description: Mastering the management of sensitive configuration data using Cloud
+    Functions config and Secret Manager.
+  fast_track_assessment: How do you access an environment variable in a Firebase Cloud
+    Function?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the difference between .env files and Cloud
+      Secret Manager for sensitive data.
+- id: firebase_app_check
+  title: Firebase App Check
+  category: firebase_platform
+  dependencies:
+  - id: firebase_project_creation
+    type: hard
+  - id: auth_console_configuration
+    type: hard
+  description: Protecting your backend resources from abuse by preventing unauthorized
+    clients from accessing your services.
+  fast_track_assessment: What is the primary purpose of Firebase App Check?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can successfully enable App Check for a service in
+      the Firebase Console.
+- id: auth_custom_claims
+  title: Auth Custom Claims (RBAC)
+  category: firebase_platform
+  dependencies:
+  - id: auth_user_registration
+    type: hard
+  description: Implementing Role-Based Access Control by attaching custom metadata
+    to user authentication tokens.
+  fast_track_assessment: How do custom claims help in securing Firestore data?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a Cloud Function snippet that sets an 'admin'
+      claim on a user.
+- id: nosql_subcollections_vs_root
+  title: 'Modeling: Subcollections vs Root Collections'
+  category: firebase_platform
+  dependencies:
+  - id: firestore_nosql_data_modeling
+    type: hard
+  description: Deep dive into Firestore structural patterns and when to use subcollections
+    for better performance and security.
+  fast_track_assessment: When is a subcollection preferable over a root-level collection?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can design a schema for a "Chat App" showing where
+      subcollections are used.
+- id: firestore_aggregation_queries
+  title: Firestore Aggregation Queries
+  category: firebase_platform
+  dependencies:
+  - id: firestore_collection_queries_getdocs
+    type: hard
+  description: Learning to perform efficient server-side calculations like count(),
+    sum(), and average() without fetching all documents.
+  fast_track_assessment: What is the advantage of using count() over fetching all
+    documents and checking the length?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a query that returns the total count of documents
+      in a collection.
+- id: firestore_transactions
+  title: Firestore Transactions
+  category: firebase_platform
+  dependencies:
+  - id: firestore_document_creation_setdoc
+    type: hard
+  description: Ensuring ACID compliance for complex data updates where multiple documents
+    must be updated atomically.
+  fast_track_assessment: Why would you use a transaction instead of a batched write?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can explain the "optimistic concurrency" model used
+      by Firestore transactions.
+- id: cloud_functions_background_triggers
+  title: Cloud Functions Background Triggers
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_deployment
+    type: hard
+  - id: firestore_instance_creation
+    type: hard
+  description: Creating reactive backend logic that fires automatically on database
+    changes or authentication events.
+  fast_track_assessment: What event type triggers a function when a new document is
+    created in Firestore?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can write a trigger that logs a message whenever a
+      new user is created in Auth.
+- id: cloud_functions_scheduled_cron
+  title: 'Cloud Functions: Scheduled (Cron)'
+  category: firebase_platform
+  dependencies:
+  - id: cloud_functions_deployment
+    type: hard
+  description: Automating periodic maintenance tasks, cleanup, or reporting using
+    pub/sub scheduled functions.
+  fast_track_assessment: How do you specify that a function should run "every Monday
+    at 9 AM"?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can define a scheduled function with a valid crontab
+      string.
+- id: ci_cd_github_actions
+  title: CI/CD with GitHub Actions
+  category: firebase_platform
+  dependencies:
+  - id: firebase_hosting_basic_deployment
+    type: hard
+  - id: git_and_version_control
+    type: hard
+  description: Automating the build, test, and deployment process for Firebase Hosting
+    and Functions using GitHub Actions.
+  fast_track_assessment: What Firebase CLI command is used to set up the GitHub Action
+    service account?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User has a .github/workflows/firebase-deploy.yml file in
+      their repository.
+- id: advanced_security_rules_logic
+  title: 'Advanced Rules: Functions & Reusable Logic'
+  category: firebase_platform
+  dependencies:
+  - id: security_rules_basic_syntax
+    type: hard
+  description: Writing maintainable and secure rules by abstracting complex logic
+    into reusable functions.
+  fast_track_assessment: How do you define a function inside Firestore Security Rules?
+  verification:
+    type: llm_rubric
+    instructions_to_user: User can refactor a repetitive rule into a single 'isSignedIn()'
+      function.
