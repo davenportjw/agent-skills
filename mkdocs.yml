@@ -1,0 +1,49 @@
+site_name: Agent Skills
+site_description: A curated collection of global skills and sidecars for agentic AI coding assistants.
+site_url: https://jasondavenport.github.io/agent-skills/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+
+nav:
+  - Home: index.md
+  - Skills:
+    - Apple Container: skills/apple_container.md
+    - GCP Auth: skills/gcp_auth.md
+    - LLM Tutor: skills/llm_tutor.md
+    - Session Journal: skills/session-journal.md
+    - Update Documentation: skills/update_documentation.md

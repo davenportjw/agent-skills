@@ -1,22 +1,20 @@
----
-name: update_documentation
-description: A skill to verify and update project documentation after changes or walkthrough creation.
----
-
 # Update Documentation
 
-<description>
-This skill ensures that the project's documentation remains in sync with the current state of the codebase, especially after significant changes or when a walkthrough artifact is created.
-</description>
+A skill to verify and update project documentation after changes or walkthrough creation.
 
-<triggers>
+## Description
+
+This skill ensures that the project's documentation remains in sync with the current state of the codebase, especially after significant changes or when a walkthrough artifact is created.
+
+## Triggers
+
 - Use this skill AFTER creating a walkthrough artifact.
 - Use this skill AFTER performing significant architectural changes.
 - Use this skill AFTER implementing new features that require setup instructions.
 - Use this skill when asked to "update documentation" or "document recent changes."
-</triggers>
 
-<instructions>
+## Instructions
+
 1. **Analyze Changes:** Review the recent changes in the codebase or the content of the newly created walkthrough.
 2. **Identify Documentation:** Identify the primary documentation files for the project.
     - Search for the main project `README.md` or system design files in the root directory.
@@ -35,4 +33,3 @@ This skill ensures that the project's documentation remains in sync with the cur
     - Fix outdated commands
     - Add new sections for new features
 6. **Report:** Summarize the documentation updates performed to the user.
-</instructions>

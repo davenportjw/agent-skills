@@ -1,2 +1,10 @@
 # Local settings and Session Notes
 .local/
+
+# Build artifacts
+site/
+.cache/
+
+# Python cache
+__pycache__/
+*.pyc
