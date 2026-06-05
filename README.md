@@ -8,7 +8,7 @@ These skills run **globally** inside your agent's App Data environment, enabling
 
 ## 📚 Documentation
 
-The full documentation for all skills is available on our [GitHub Pages site](https://jasondavenport.github.io/agent-skills/).
+The full documentation for all skills is available on our [GitHub Pages site](https://davenportjw.github.io/agent-skills/).
 
 ## 🛠 Available Skills
 
@@ -31,7 +31,7 @@ To install and load these skills into your active coding assistant's global envi
 cp -R .skills/update_documentation <global_agent_directory>/skills/update_documentation
 ```
 
-For more complex skills like `session-journal`, additional setup may be required for sidecar daemons. Please see the [Documentation](https://jasondavenport.github.io/agent-skills/) for detailed installation steps per skill.
+For more complex skills like `session-journal`, additional setup may be required for sidecar daemons. Please see the [Documentation](https://davenportjw.github.io/agent-skills/) for detailed installation steps per skill.
 
 
 ---

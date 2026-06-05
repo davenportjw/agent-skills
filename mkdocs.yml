@@ -1,6 +1,6 @@
 site_name: Agent Skills
 site_description: A curated collection of global skills and sidecars for agentic AI coding assistants.
-site_url: https://jasondavenport.github.io/agent-skills/
+site_url: https://davenportjw.github.io/agent-skills/
 
 theme:
   name: material
