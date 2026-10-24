@@ -1,4 +1,6 @@
+import type * as tsNs from 'typescript';
 import type { CompilerAdapter, CompilerGraphBatch } from '../types.js';
+export declare function resolveTypeScriptModule(): typeof tsNs;
 interface WorkspacePkgInfo {
     name: string;
     version: string;

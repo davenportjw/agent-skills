@@ -1,7 +1,26 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
-import ts from 'typescript';
+export function resolveTypeScriptModule() {
+    const candidates = [
+        path.join(process.cwd(), 'package.json'),
+        path.join(os.homedir(), '.gemini/config/node_modules/sidecar_sdk/package.json'),
+        import.meta.url,
+    ];
+    for (const base of candidates) {
+        try {
+            const req = createRequire(base);
+            return req('typescript');
+        }
+        catch {
+            // Try next candidate
+        }
+    }
+    throw new Error("Cannot resolve 'typescript' from workspace or ~/.gemini/config/node_modules");
+}
+const ts = resolveTypeScriptModule();
 function computeCyclomaticComplexity(node) {
     let complexity = 1;
     const visit = (n) => {

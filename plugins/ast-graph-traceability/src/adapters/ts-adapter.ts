@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
-import ts from 'typescript';
+import type * as tsNs from 'typescript';
 import type {
   CompilerAdapter,
   CompilerGraphBatch,
@@ -13,6 +15,37 @@ import type {
   NodeKind,
   ScipSymbolUri,
 } from '../types.js';
+
+declare namespace ts {
+  export type Node = tsNs.Node;
+  export type SourceFile = tsNs.SourceFile;
+  export type CompilerOptions = tsNs.CompilerOptions;
+  export type BinaryExpression = tsNs.BinaryExpression;
+  export type CallExpression = tsNs.CallExpression;
+  export type PropertyAccessExpression = tsNs.PropertyAccessExpression;
+  export type Identifier = tsNs.Identifier;
+  export type Diagnostic = tsNs.Diagnostic;
+  export type Symbol = tsNs.Symbol;
+}
+
+export function resolveTypeScriptModule(): typeof tsNs {
+  const candidates = [
+    path.join(process.cwd(), 'package.json'),
+    path.join(os.homedir(), '.gemini/config/node_modules/sidecar_sdk/package.json'),
+    import.meta.url,
+  ];
+  for (const base of candidates) {
+    try {
+      const req = createRequire(base);
+      return req('typescript') as typeof tsNs;
+    } catch {
+      // Try next candidate
+    }
+  }
+  throw new Error("Cannot resolve 'typescript' from workspace or ~/.gemini/config/node_modules");
+}
+
+const ts: typeof tsNs = resolveTypeScriptModule();
 
 interface WorkspacePkgInfo {
   name: string;

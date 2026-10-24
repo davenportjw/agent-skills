@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import ts from 'typescript';
 import { PythonCompilerAdapter } from './adapters/python-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
-import { TypeScriptCompilerAdapter } from './adapters/ts-adapter.js';
+import { TypeScriptCompilerAdapter, resolveTypeScriptModule } from './adapters/ts-adapter.js';
+const ts = resolveTypeScriptModule();
 export class AstGraphIndexer {
     workspaceRoot;
     db;

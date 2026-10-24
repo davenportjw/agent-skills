@@ -2,10 +2,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import ts from 'typescript';
+import type * as tsNs from 'typescript';
 import { PythonCompilerAdapter } from './adapters/python-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
-import { TypeScriptCompilerAdapter } from './adapters/ts-adapter.js';
+import { TypeScriptCompilerAdapter, resolveTypeScriptModule } from './adapters/ts-adapter.js';
+
+declare namespace ts {
+  export type Node = tsNs.Node;
+  export type SourceFile = tsNs.SourceFile;
+}
+
+const ts: typeof tsNs = resolveTypeScriptModule();
 import type { AstGraphDatabase } from './db.js';
 import type {
   CompilerGraphBatch,
