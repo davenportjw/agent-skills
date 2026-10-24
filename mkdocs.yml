@@ -42,6 +42,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Skills:
+    - AST GraphDB Traceability: skills/ast-graph-traceability.md
     - Apple Container: skills/apple_container.md
     - GCP Auth: skills/gcp_auth.md
     - LLM Tutor: skills/llm_tutor.md

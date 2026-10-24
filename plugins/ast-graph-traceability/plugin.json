@@ -1,0 +1,12 @@
+{
+  "name": "ast-graph-traceability",
+  "displayName": "AST GraphDB Traceability",
+  "version": "0.1.0",
+  "description": "Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server, and targeted test selection workflow (SCIP + SQLite LPG) for TypeScript, Zod, Fastify, Vitest, Terraform, and Python.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Run ast_analyze to audit package coupling, instability, circular dependencies, and untested hubs",
+    "Compute the 3-hop upstream blast radius and covering tests for a shared symbol before refactoring",
+    "Trace end-to-end lineage for a Zod protocol schema or HTTP route across the stack"
+  ]
+}

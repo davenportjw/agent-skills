@@ -8,3 +8,7 @@ site/
 # Python cache
 __pycache__/
 *.pyc
+
+# Node & AST GraphDB caches
+node_modules/
+.ast-graph/

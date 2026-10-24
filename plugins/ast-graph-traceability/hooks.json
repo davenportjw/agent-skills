@@ -1,0 +1,24 @@
+{
+  "ast-graph-traceability-sync": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "if [ -f dist/hook-handler.js ]; then node --no-warnings dist/hook-handler.js session-start; elif [ -f tools/ast-sidecar/dist/hook-handler.js ]; then node --no-warnings tools/ast-sidecar/dist/hook-handler.js session-start; elif [ -f ~/.gemini/config/plugins/ast-graph-traceability/dist/hook-handler.js ]; then node --no-warnings ~/.gemini/config/plugins/ast-graph-traceability/dist/hook-handler.js session-start; fi",
+        "timeout": 15
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f dist/hook-handler.js ]; then node --no-warnings dist/hook-handler.js post-tool-use; elif [ -f tools/ast-sidecar/dist/hook-handler.js ]; then node --no-warnings tools/ast-sidecar/dist/hook-handler.js post-tool-use; elif [ -f ~/.gemini/config/plugins/ast-graph-traceability/dist/hook-handler.js ]; then node --no-warnings ~/.gemini/config/plugins/ast-graph-traceability/dist/hook-handler.js post-tool-use; fi",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

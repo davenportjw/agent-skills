@@ -1,0 +1,48 @@
+{
+  "name": "@warehouse/ast-sidecar",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "warehouse-ast": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "wireit",
+    "test": "wireit",
+    "sync": "node ./dist/cli.js sync",
+    "analyze": "node ./dist/cli.js analyze",
+    "benchmark": "node ./dist/cli.js benchmark",
+    "daemon": "node ./dist/daemon.js",
+    "mcp": "node ./dist/mcp.js"
+  },
+  "wireit": {
+    "build": {
+      "command": "tsc",
+      "dependencies": [],
+      "files": [
+        "src/**",
+        "tsconfig.json",
+        "../../tsconfig.base.json"
+      ],
+      "output": [
+        "dist/**"
+      ],
+      "clean": "if-file-deleted"
+    },
+    "test": {
+      "command": "vitest run",
+      "dependencies": [
+        "build"
+      ],
+      "files": [
+        "test/**",
+        "src/**",
+        "tsconfig.json"
+      ],
+      "output": []
+    }
+  },
+  "dependencies": {
+    "typescript": "^5.7.3"
+  }
+}

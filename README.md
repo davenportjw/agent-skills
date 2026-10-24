@@ -10,10 +10,11 @@ These skills run **globally** inside your agent's App Data environment, enabling
 
 The full documentation for all skills is available on our [GitHub Pages site](https://davenportjw.github.io/agent-skills/).
 
-## 🛠 Available Skills
+## 🛠 Available Plugins & Skills
 
-This repository includes the following curated skills:
+This repository includes the following curated plugins and skills:
 
+* **`ast-graph-traceability`** ([`plugins/ast-graph-traceability`](plugins/ast-graph-traceability) & [`.skills/ast-graph-traceability`](.skills/ast-graph-traceability)): Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server (`warehouse-ast-graph`), lifecycle hooks (`hooks.json`), and targeted test selection workflow (SCIP + SQLite LPG).
 * **`apple_container`**: Replaces Docker with Apple's native container CLI for local development, orchestration, and Kubernetes.
 * **`gcp_auth`**: Implement and debug Google Cloud Authentication using Identity Platform, Firebase, and Cloud Run IAM.
 * **`llm_tutor`**: A generic tutor skill that reads a curriculum YAML schema, adapts to user personas, and interactively guides learners.
@@ -24,7 +25,17 @@ This repository includes the following curated skills:
 
 ## 🚀 Installation Guide
 
-To install and load these skills into your active coding assistant's global environment, copy the desired directories into your App Data Directory's skills folder (e.g., `<global_agent_directory>/skills/`):
+### Installing the AST GraphDB Plugin (Antigravity)
+
+Copy the `ast-graph-traceability` plugin bundle into your global Antigravity plugins directory (`~/.gemini/config/plugins/`):
+
+```bash
+cp -R plugins/ast-graph-traceability ~/.gemini/config/plugins/ast-graph-traceability
+```
+
+### Installing Standalone Skills
+
+To install and load standalone skills into your active coding assistant's global environment, copy the desired directories into your App Data Directory's skills folder (e.g., `<global_agent_directory>/skills/`):
 
 ```bash
 # Example: Install the update_documentation skill
