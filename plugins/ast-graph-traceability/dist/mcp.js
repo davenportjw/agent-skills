@@ -510,10 +510,12 @@ if (isMain) {
         }
     });
     process.stdin.on('end', () => {
+        if (debounceTimer)
+            clearTimeout(debounceTimer);
         for (const w of watchers)
             w.close();
         mcp.close();
-        process.exit(0);
+        process.stdout.write('', () => process.exit(0));
     });
 }
 //# sourceMappingURL=mcp.js.map
