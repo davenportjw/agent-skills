@@ -1,0 +1,19 @@
+{
+  "name": "agent-skills",
+  "owner": {
+    "name": "Jason Davenport",
+    "url": "https://github.com/davenportjw"
+  },
+  "metadata": {
+    "description": "Curated collection of global skills, plugins, and AST GraphDB sidecars for agentic AI coding assistants.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ast-graph-traceability",
+      "source": "./plugins/ast-graph-traceability",
+      "description": "Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server, and targeted test selection workflow (SCIP + SQLite LPG).",
+      "version": "0.1.0"
+    }
+  ]
+}
