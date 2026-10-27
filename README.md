@@ -16,6 +16,7 @@ This repository includes the following curated plugins and skills:
 
 * **`ast-graph-traceability`** ([`plugins/ast-graph-traceability`](plugins/ast-graph-traceability) & [`.skills/ast-graph-traceability`](.skills/ast-graph-traceability)): Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server (`warehouse-ast-graph`), lifecycle hooks (`hooks.json`), and targeted test selection workflow (SCIP + SQLite LPG).
 * **`apple_container`**: Replaces Docker with Apple's native container CLI for local development, orchestration, and Kubernetes.
+* **`ast-graph`** (`plugins/ast-graph` & `.skills/ast-graph-traceability`): Multi-repo, tamper-proof AST & Cross-Layer Lineage GraphDB plugin (`.ast-graph/ast.db`, SCIP + SQLite LPG) across TypeScript/JS, Python, Go/Templ, Terraform, and SQL.
 * **`gcp_auth`**: Implement and debug Google Cloud Authentication using Identity Platform, Firebase, and Cloud Run IAM.
 * **`llm_tutor`**: A generic tutor skill that reads a curriculum YAML schema, adapts to user personas, and interactively guides learners.
 * **`session-journal`**: Automatically logs, tracks, and summarizes active coding sessions and discussions inside your workspace.

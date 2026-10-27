@@ -11,4 +11,5 @@ __pycache__/
 
 # Node & AST GraphDB caches
 node_modules/
+*.tsbuildinfo
 .ast-graph/

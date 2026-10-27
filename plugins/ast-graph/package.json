@@ -1,0 +1,25 @@
+{
+  "name": "@agent-skills/ast-graph",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "ast-graph": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "assess": "node --no-warnings ./dist/cli.js assess",
+    "sync": "node --no-warnings ./dist/cli.js sync",
+    "analyze": "node --no-warnings ./dist/cli.js analyze",
+    "benchmark": "node --no-warnings ./dist/cli.js benchmark",
+    "mcp": "node --no-warnings ./dist/mcp.js"
+  },
+  "dependencies": {
+    "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "vitest": "^3.2.7"
+  }
+}

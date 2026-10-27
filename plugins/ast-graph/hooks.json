@@ -1,0 +1,24 @@
+{
+  "ast-graph-sync": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node --no-warnings /Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/hook-handler.js session-start",
+        "timeout": 20
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content|edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --no-warnings /Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/hook-handler.js post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

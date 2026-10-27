@@ -1,0 +1,11 @@
+{
+  "name": "ast-graph",
+  "displayName": "AST GraphDB & Cross-Layer Lineage",
+  "version": "1.0.0",
+  "description": "Multi-language, multi-repo SQLite Labeled Property Graph sidecar for TypeScript/JS, Python/FastAPI/Pydantic, Go/Templ, SQL DDL, and Terraform with tamper-proof per-project isolation.",
+  "suggestedPrompts": [
+    "Assess this repository and synchronize its AST GraphDB index",
+    "Compute the 3-hop upstream blast radius and covering tests for a core symbol",
+    "Trace end-to-end cross-layer lineage across schemas, HTTP routes, and infrastructure"
+  ]
+}

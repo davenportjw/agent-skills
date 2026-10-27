@@ -44,6 +44,7 @@ nav:
   - Skills:
     - AST GraphDB Traceability: skills/ast-graph-traceability.md
     - Apple Container: skills/apple_container.md
+    - AST GraphDB Plugin: skills/ast_graph.md
     - GCP Auth: skills/gcp_auth.md
     - LLM Tutor: skills/llm_tutor.md
     - Session Journal: skills/session-journal.md

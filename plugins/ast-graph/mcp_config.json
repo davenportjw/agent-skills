@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ast-graph": {
+      "command": "node",
+      "args": [
+        "--no-warnings",
+        "/Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/mcp.js"
+      ]
+    }
+  }
+}
