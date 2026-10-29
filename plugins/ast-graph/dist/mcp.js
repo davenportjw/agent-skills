@@ -168,7 +168,7 @@ export const MCP_TOOLS_MANIFEST = [
                 },
                 limit: {
                     type: 'number',
-                    description: 'Maximum read/write references to return per category (default: 40)',
+                    description: 'Maximum read/write references to return per category (default: 25)',
                 },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
@@ -199,7 +199,7 @@ export const MCP_TOOLS_MANIFEST = [
                     description: 'Optional NodeKind filter (Function, Class, Property, Interface, TypeAlias, Variable, ZodSchema)',
                 },
                 exportedOnly: { type: 'boolean', description: 'Only return exported symbols (default: false)' },
-                limit: { type: 'number', description: 'Maximum symbols to return (default: 80)' },
+                limit: { type: 'number', description: 'Maximum symbols to return (default: 40; output is capped at ~3.8KB inline)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
             required: ['filePath'],
@@ -216,7 +216,7 @@ export const MCP_TOOLS_MANIFEST = [
                     type: 'string',
                     description: 'Optional NodeKind filter (Function, Class, Property, ZodSchema, RouteEndpoint, etc.)',
                 },
-                limit: { type: 'number', description: 'Maximum matches to return (default: 25)' },
+                limit: { type: 'number', description: 'Maximum matches to return (default: 15; output is capped at ~3.8KB inline)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
             required: ['query'],
@@ -570,7 +570,7 @@ export class AstMcpServer {
                     }
                     case 'ast_refs': {
                         const targets = norm.symbolTargets.length > 0 ? norm.symbolTargets : [''];
-                        const limit = args.limit !== undefined ? Number(args.limit) : 40;
+                        const limit = args.limit !== undefined ? Number(args.limit) : 25;
                         const resolveOne = (t) => {
                             const res = db.getSymbolReferences(t, { limit });
                             const didYouMean = res.resolvedSymbols.length === 0 ? db.suggestClosestSymbols(t, 5) : undefined;
@@ -599,7 +599,7 @@ export class AstMcpServer {
                         const filter = args.filter ? String(args.filter) : undefined;
                         const kind = args.kind ? String(args.kind) : undefined;
                         const exportedOnly = Boolean(args.exportedOnly);
-                        const limit = args.limit !== undefined ? Number(args.limit) : 80;
+                        const limit = args.limit !== undefined ? Number(args.limit) : 40;
                         if (filePaths.length > 1) {
                             payload = {
                                 workspaceRoot,
@@ -626,7 +626,7 @@ export class AstMcpServer {
                     case 'ast_search': {
                         const queries = norm.symbolTargets.length > 0 ? norm.symbolTargets : [''];
                         const kind = args.kind ? String(args.kind) : undefined;
-                        const limit = args.limit !== undefined ? Number(args.limit) : 25;
+                        const limit = args.limit !== undefined ? Number(args.limit) : 15;
                         const searchOne = (q) => {
                             const matches = db.searchSymbols(q, kind, limit);
                             const didYouMean = matches.length === 0 && q.trim() ? db.suggestClosestSymbols(q, 5) : undefined;
@@ -636,6 +636,7 @@ export class AstMcpServer {
                                 count: matches.length,
                                 matches,
                                 ...(didYouMean ? { didYouMean } : {}),
+                                ...(matches.length === 0 && kind ? { availableKinds: db.listKindCounts() } : {}),
                             };
                         };
                         if (queries.length > 1) {

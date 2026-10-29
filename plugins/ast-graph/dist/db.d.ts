@@ -38,6 +38,11 @@ export declare class AstGraphDatabase {
         exactOnly?: boolean;
     }): SymbolSummary[];
     private normalizeKindFilter;
+    /** Distinct node kinds with counts, used to explain zero-result `kind` filters. */
+    listKindCounts(limit?: number): Array<{
+        kind: string;
+        count: number;
+    }>;
     searchSymbols(query: string, rawKind?: string, limit?: number): SymbolSummary[];
     suggestClosestSymbols(query: string, limit?: number): SymbolSummary[];
     getFileOutline(filePathQuery: string, options?: {

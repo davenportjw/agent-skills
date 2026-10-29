@@ -735,6 +735,17 @@ export class AstGraphDatabase {
     return aliases[cleaned] ?? raw.trim();
   }
 
+  /** Distinct node kinds with counts, used to explain zero-result `kind` filters. */
+  public listKindCounts(limit = 40): Array<{ kind: string; count: number }> {
+    return this.db
+      .prepare(
+        `SELECT kind, COUNT(*) AS count FROM nodes
+         WHERE kind NOT IN ('File', 'WorkspacePackage')
+         GROUP BY kind ORDER BY count DESC LIMIT ?`,
+      )
+      .all(limit) as Array<{ kind: string; count: number }>;
+  }
+
   public searchSymbols(query: string, rawKind?: string, limit = 20): SymbolSummary[] {
     const t0 = performance.now();
     const kind = this.normalizeKindFilter(rawKind);

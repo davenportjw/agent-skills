@@ -14,5 +14,6 @@ Always use the **AST GraphDB Plugin** (`ast-graph` MCP server or `node ~/.gemini
 
 ## 2. Strict Anti-Chunking & AST-First Lookup Mandate
 1. **NEVER Chunk-Read Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, and never page through files in 800-line chunks (`1-800`, `801-1600`, ...).
-2. **Sequential AST-First Lookup**: Run `ast_symbol`, `ast_refs`, `ast_outline`, or `ast_search` **first**, inspect the `=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===` block for exact `filePath#L<start>-L<end>` spans, and then read only that exact line range.
+2. **Sequential AST-First Lookup**: Run `ast_symbol`, `ast_refs`, `ast_outline`, or `ast_search` **first**. Read the `=== TARGET SUMMARY ===` block, which sits directly under the header line, for exact `filePath#L<start>-L<end>` spans, then read only that exact line range. Results are capped at about 3.8 KB inline. If lines were omitted, narrow with `filter`/`kind`, or open the `full output:` path from the footer.
 3. **Targeted Test Selection**: Before running a full test suite, run `ast_tests_for` or `ast_blast_radius` to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, or `go test ...`).
+4. **Batch Symbols, Grep Literals**: For several identifiers, pass `queries: [...]` to one `ast_search` / `ast_symbol` / `ast_refs` call instead of a `grep "a\|b\|c"` alternation. String literals, UI copy, CSS values, and log text are not symbols, so use `grep -rn` / `rg` for those.

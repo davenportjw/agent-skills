@@ -91,7 +91,7 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
             };
             readonly limit: {
                 readonly type: "number";
-                readonly description: "Maximum read/write references to return per category (default: 40)";
+                readonly description: "Maximum read/write references to return per category (default: 25)";
             };
             readonly workspace: {
                 readonly type: "string";
@@ -131,7 +131,7 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
             };
             readonly limit: {
                 readonly type: "number";
-                readonly description: "Maximum symbols to return (default: 80)";
+                readonly description: "Maximum symbols to return (default: 40; output is capped at ~3.8KB inline)";
             };
             readonly workspace: {
                 readonly type: "string";
@@ -156,7 +156,7 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
             };
             readonly limit: {
                 readonly type: "number";
-                readonly description: "Maximum matches to return (default: 25)";
+                readonly description: "Maximum matches to return (default: 15; output is capped at ~3.8KB inline)";
             };
             readonly workspace: {
                 readonly type: "string";

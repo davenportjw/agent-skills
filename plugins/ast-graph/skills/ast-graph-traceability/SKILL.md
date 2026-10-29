@@ -54,6 +54,20 @@ All MCP tools accept an optional `workspace` parameter (repository path or repos
 - `ast_analyze`: Compute package coupling/instability, untested hubs, dead exports, and cycles.
 - `ast_sync`: Trigger incremental or full synchronization.
 
+### Output Contract (compact, summary-first, inline-budgeted)
+
+- Every text result is **at most about 3.8 KB**, so agent harnesses keep it inline instead of spilling it to a file.
+- Line 1 is the header (`[repo=…] [AST …]`). It is followed **immediately** by the `=== TARGET SUMMARY ===` block (top match, exact `filePath#L<start>-L<end>`, recommended `read_file` range or test command), then `--- details ---`.
+- When results exceed the budget, only detail lines are dropped. The footer says how many lines were omitted and where the full output was saved: `<repo>/.ast-graph/last/<command>.txt`.
+- `ast_outline` prints the file path once in the header. Detail lines carry only `L<start>-L<end>` spans. `ast_search` groups hits under each file path.
+- Default limits: search 15, outline 40, refs 25 per category, symbol 20. Narrow with `filter`, `kind`, or `limit` rather than raising the limit.
+- **Batch instead of grep alternations.** `ast_search`, `ast_symbol`, and `ast_refs` accept `queries: [...]` / `targets: [...]`. Each batch item keeps its own summary within a shared budget.
+- Zero-result diagnostics:
+  - `NOT INDEXED` (run `ast_sync` with `paths`).
+  - `Kinds present in this repo: …` for an unmatched `kind`.
+  - A `grep -rn` recommendation for string literals / UI copy / log text, which are not symbols.
+- TypeScript class members report `exp` only when public. `private`, `protected`, and `#private` members are not marked exported.
+
 ---
 
 ## 4. CLI Usage

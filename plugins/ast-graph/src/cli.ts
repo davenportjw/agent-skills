@@ -122,22 +122,136 @@ function oneLine(text: string | null | undefined, maxLen = 110): string {
   return collapsed.length > maxLen ? `${collapsed.slice(0, maxLen - 3)}...` : collapsed;
 }
 
-export function enforceInlineSizeCap(text: string, maxChars = 5400): string {
-  if (text.length <= maxChars) return text;
-  const marker = '=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===';
-  const lastIdx = text.lastIndexOf(marker);
-  if (lastIdx === -1) {
-    return `${text.slice(0, maxChars - 80)}\n... [truncated to stay inline <5.4KB]`;
-  }
-  const tail = text.slice(lastIdx);
-  const budgetForHead = Math.max(600, maxChars - tail.length - 90);
-  const head = text.slice(0, budgetForHead);
-  const lastNewline = head.lastIndexOf('\n');
-  const cleanHead = lastNewline > 200 ? head.slice(0, lastNewline) : head;
-  return `${cleanHead}\n  ... [middle lines truncated to stay inline <5.4KB; pass filter/kind to narrow] ...\n\n${tail}`;
+/**
+ * Marker that separates the actionable summary block from detail lines. Formatters emit it
+ * near the end; {@link moveSummaryFirst} hoists it directly under the header line so that
+ * truncation only ever drops detail lines, never the summary.
+ */
+export const SUMMARY_MARKER = '=== TARGET SUMMARY ===';
+
+/**
+ * Inline byte budget for MCP/CLI text. Agent harnesses spill tool output above ~5 KB to a
+ * file and show the model only the file path (observed in 35% of historical ast_* calls),
+ * forcing an extra read round trip. Staying under this budget keeps results inline.
+ */
+export const INLINE_BYTE_BUDGET = 3800;
+
+const DETAILS_MARKER = '--- details ---';
+
+function byteLen(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
 }
 
-export function formatCompactCliOutput(command: string, data: unknown, queryArg = ''): string {
+/** Hoist the trailing summary block directly beneath the first (header) line. */
+export function moveSummaryFirst(text: string): string {
+  const idx = text.lastIndexOf(SUMMARY_MARKER);
+  if (idx === -1) return text;
+  const summary = text.slice(idx).trimEnd();
+  const head = text.slice(0, idx).trimEnd();
+  const nl = head.indexOf('\n');
+  const headerLine = nl === -1 ? head : head.slice(0, nl);
+  const details = nl === -1 ? '' : head.slice(nl + 1).replace(/\n+$/, '');
+  return details.trim()
+    ? `${headerLine}\n${summary}\n${DETAILS_MARKER}\n${details}`
+    : `${headerLine}\n${summary}`;
+}
+
+export interface InlineCapOptions {
+  /** Absolute path where the untruncated text was saved (tee), surfaced in the footer. */
+  fullOutputPath?: string;
+}
+
+/**
+ * Truncate whole lines from the bottom until the text fits `maxBytes`. Because summaries are
+ * hoisted first, only detail lines are dropped. The footer tells the agent how to narrow the
+ * query and where the full output lives (tee pattern, as popularized by rtk).
+ */
+export function enforceInlineSizeCap(
+  text: string,
+  maxBytes = INLINE_BYTE_BUDGET,
+  options: InlineCapOptions = {},
+): string {
+  if (byteLen(text) <= maxBytes) return text;
+  const lines = text.split('\n');
+  const footerFor = (omitted: number) =>
+    `  ... [${omitted} more lines omitted to stay inline <${(maxBytes / 1000).toFixed(1)}KB; narrow with filter/kind/limit${
+      options.fullOutputPath ? ` | full output: ${options.fullOutputPath}` : ''
+    }]`;
+  const kept: string[] = [];
+  let used = byteLen(footerFor(lines.length)) + 1;
+  for (const line of lines) {
+    const cost = byteLen(line) + 1;
+    if (used + cost > maxBytes) break;
+    kept.push(line);
+    used += cost;
+  }
+  if (kept.length === 0) {
+    // Single pathological line: hard-slice it.
+    kept.push(Buffer.from(lines[0] ?? '').subarray(0, Math.max(0, maxBytes - 200)).toString('utf8'));
+  }
+  return `${kept.join('\n')}\n${footerFor(lines.length - kept.length)}`;
+}
+
+/** Persist the full formatted output to `<repo>/.ast-graph/last/<command>.txt`; best-effort. */
+function teeFullOutput(workspaceRoot: unknown, command: string, text: string): string | undefined {
+  if (typeof workspaceRoot !== 'string' || !workspaceRoot) return undefined;
+  try {
+    const dir = path.join(workspaceRoot, '.ast-graph', 'last');
+    if (!fs.existsSync(path.join(workspaceRoot, '.ast-graph'))) return undefined;
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${command.replace(/[^a-z0-9_-]/gi, '_')}.txt`);
+    fs.writeFileSync(file, text, 'utf8');
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface CompactFormatOptions {
+  /** Override the inline byte budget (default {@link INLINE_BYTE_BUDGET}). */
+  maxBytes?: number;
+  /** Disable writing the untruncated output to `.ast-graph/last/` (default: enabled). */
+  tee?: boolean;
+}
+
+/**
+ * Render a compact, summary-first, byte-budgeted text view of an AST query payload for
+ * agents (MCP `content[0].text` and CLI stdout).
+ */
+export function formatCompactCliOutput(
+  command: string,
+  data: unknown,
+  queryArg = '',
+  options: CompactFormatOptions = {},
+): string {
+  const maxBytes = options.maxBytes ?? INLINE_BYTE_BUDGET;
+  const full = moveSummaryFirst(formatCompactBody(command, data, queryArg, maxBytes));
+  if (byteLen(full) <= maxBytes) return full;
+  const rec = (data ?? {}) as Record<string, unknown>;
+  const fullOutputPath = options.tee === false ? undefined : teeFullOutput(rec.workspaceRoot, command, full);
+  return enforceInlineSizeCap(full, maxBytes, { fullOutputPath });
+}
+
+function formatBatch(
+  items: Array<{ command: string; target: string; data: unknown }>,
+  repoPrefix: string,
+  maxBytes: number,
+): string {
+  const header = `${repoPrefix}[AST BATCH] ${items.length} targets`;
+  const perItem = Math.max(700, Math.floor((maxBytes - byteLen(header) - 40) / Math.max(1, items.length)));
+  const parts = items.map((item, idx) => {
+    const rendered = moveSummaryFirst(formatCompactBody(item.command, item.data, item.target, perItem));
+    return enforceInlineSizeCap(`### [${idx + 1}/${items.length}] ${item.target}\n${rendered}`, perItem);
+  });
+  return [header, ...parts].join('\n\n');
+}
+
+function formatCompactBody(
+  command: string,
+  data: unknown,
+  queryArg = '',
+  maxBytes = INLINE_BYTE_BUDGET,
+): string {
   const rec = (data ?? {}) as Record<string, unknown>;
   const repoPrefix =
     typeof rec.workspaceRoot === 'string' && rec.workspaceRoot
@@ -146,37 +260,36 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
 
   if (Array.isArray(rec.batchItems)) {
     const items = rec.batchItems as Array<{ target: string; result: unknown }>;
-    return enforceInlineSizeCap(
-      items
-        .map(
-          (item, idx) =>
-            `### [${idx + 1}/${items.length}] Target: ${item.target}\n${formatCompactCliOutput(command, item.result, item.target)}`,
-        )
-        .join('\n\n'),
+    return formatBatch(
+      items.map((item) => ({ command, target: item.target, data: item.result })),
+      repoPrefix,
+      maxBytes,
     );
   }
 
   if (Array.isArray(rec.results)) {
     const items = rec.results as Array<Record<string, unknown>>;
-    return enforceInlineSizeCap(
-      items
-        .map((item, idx) => {
-          const target = String(item.query ?? item.target ?? `#${idx + 1}`);
-          return `### [${idx + 1}/${items.length}] Target: ${target}\n${formatCompactCliOutput(command, item, target)}`;
-        })
-        .join('\n\n'),
+    return formatBatch(
+      items.map((item, idx) => ({
+        command,
+        target: String(item.query ?? item.target ?? `#${idx + 1}`),
+        data: item,
+      })),
+      repoPrefix,
+      maxBytes,
     );
   }
 
   if (Array.isArray(rec.outlines)) {
     const items = rec.outlines as Array<Record<string, unknown>>;
-    return enforceInlineSizeCap(
-      items
-        .map((item, idx) => {
-          const target = String(item.filePath ?? item.query ?? `#${idx + 1}`);
-          return `### [${idx + 1}/${items.length}] Target: ${target}\n${formatCompactCliOutput('outline', item, target)}`;
-        })
-        .join('\n\n'),
+    return formatBatch(
+      items.map((item, idx) => ({
+        command: 'outline',
+        target: String(item.filePath ?? item.query ?? `#${idx + 1}`),
+        data: item,
+      })),
+      repoPrefix,
+      maxBytes,
     );
   }
 
@@ -237,7 +350,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     }
 
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(`Target Property/Symbol: ${targetLabel} (writes=${totalWrites}, reads=${totalReads})`);
     if (resolvedSymbols[0]) {
       const top = resolvedSymbols[0];
@@ -265,7 +378,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
         `Recommended Action: view_file on ${primaryFocus.callSiteFile} with StartLine=${primaryFocus.srcStartLine}, EndLine=${primaryFocus.srcEndLine}`,
       );
     }
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'symbol') {
@@ -291,7 +404,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
         }
         const top = matches[0];
         lines.push('');
-        lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+        lines.push(SUMMARY_MARKER);
         lines.push(`Query: "${queryLabel}" (No exact match; ${matches.length} symbol suggestions above)`);
         if (top) {
           lines.push(`Top Suggestion: ${top.name} (${top.kind}) at ${top.filePath}#L${top.startLine}-L${top.endLine}`);
@@ -301,7 +414,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
         } else {
           lines.push('Recommended Action: Run `ast_outline` or `ast_search`');
         }
-        return enforceInlineSizeCap(lines.join('\n'));
+        return lines.join('\n');
       }
 
       const lines: string[] = [
@@ -335,14 +448,14 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
         lines.push(`  - [${testKind}] ${testName} -> ${t.filePath}#L${t.startLine}-L${t.endLine}`);
       }
       lines.push('');
-      lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+      lines.push(SUMMARY_MARKER);
       lines.push(`Target Symbol: ${sym.name} (${sym.kind})`);
       lines.push(`Exact Location: ${sym.filePath}#L${sym.startLine}-L${sym.endLine}`);
       lines.push(`Signature: ${oneLine(String(sym.signature ?? sym.name), 120)}`);
       lines.push(
         `Recommended Action: view_file on ${sym.filePath} with StartLine=${sym.startLine}, EndLine=${sym.endLine}`,
       );
-      return enforceInlineSizeCap(lines.join('\n'));
+      return lines.join('\n');
     }
   }
 
@@ -353,19 +466,26 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     const totalSymbols = Number(rec.totalSymbolsInFile ?? rec.totalSymbols ?? symbols.length);
     const matchedCount = Number(rec.matchedSymbolsCount ?? symbols.length);
     const lines: string[] = [
-      `${repoPrefix}[AST FILE OUTLINE] ${filePath} (${Math.min(symbols.length, 55)} shown of ${matchedCount} matched / ${totalSymbols} total symbols in ${rec.lineCount ?? '?'} lines)`,
+      `${repoPrefix}[AST FILE OUTLINE] ${filePath} (${symbols.length} shown of ${matchedCount} matched / ${totalSymbols} total symbols in ${rec.lineCount ?? '?'} lines)`,
     ];
-    for (const s of symbols.slice(0, 55)) {
+    // The file path is printed once in the header; detail lines carry only spans.
+    for (const s of symbols) {
       lines.push(
-        `  ${filePath}#L${s.startLine}-L${s.endLine} | [${s.kind}${s.exported ? ' exp' : ''}] ${s.name} :: ${oneLine(String(s.signature ?? s.name), 95)}`,
+        `  L${s.startLine}-L${s.endLine} [${s.kind}${s.exported ? ' exp' : ''}] ${s.name} :: ${oneLine(String(s.signature ?? s.name), 80)}`,
       );
     }
     if (symbols.length === 0 && candidateFiles.length > 0) {
       lines.push(`  No exact file match for "${filePath}". Closest indexed files: ${candidateFiles.slice(0, 8).join(', ')}`);
+    } else if (symbols.length === 0 && totalSymbols === 0) {
+      lines.push(
+        `  NOT INDEXED: "${filePath}" has no symbols in the graph. If the file exists, run ast_sync with paths=["${filePath}"] (or check the workspace), then retry.`,
+      );
+    } else if (symbols.length === 0) {
+      lines.push(`  ${totalSymbols} symbols exist in this file but none matched the filter/kind; broaden or omit them.`);
     }
     const first = symbols[0];
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(`File Outline: ${filePath} (${matchedCount}/${totalSymbols} symbols matched)`);
     if (symbols.length > 0) {
       const keySpans = symbols
@@ -382,22 +502,47 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     } else {
       lines.push('Recommended Action: Try a broader --filter or omit --kind');
     }
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'search' || (command === 'symbol' && 'matches' in rec && !('symbol' in rec))) {
     const matches = (rec.matches as Array<Record<string, unknown>> | undefined) ?? [];
     const q = String(rec.query ?? queryArg);
     const lines: string[] = [
-      `${repoPrefix}[AST SEARCH] query="${q}"${rec.kind ? ` kind=${rec.kind}` : ''} (${Math.min(matches.length, 40)} shown of ${matches.length} matches)`,
+      `${repoPrefix}[AST SEARCH] query="${q}"${rec.kind ? ` kind=${rec.kind}` : ''} (${matches.length} matches)`,
     ];
-    for (const m of matches.slice(0, 40)) {
-      lines.push(
-        `  - ${m.name} (${m.kind}${m.exported ? ', exported' : ''}) -> ${m.filePath}#L${m.startLine}-L${m.endLine} | ${oneLine(String(m.signature ?? m.name), 90)}`,
-      );
+    // Group by file (first-appearance order preserves rank) so each path prints once.
+    const byFile = new Map<string, Array<Record<string, unknown>>>();
+    for (const m of matches) {
+      const key = String(m.filePath);
+      if (!byFile.has(key)) byFile.set(key, []);
+      byFile.get(key)!.push(m);
+    }
+    for (const [file, group] of byFile) {
+      lines.push(`  ${file}`);
+      for (const m of group) {
+        lines.push(
+          `    L${m.startLine}-L${m.endLine} ${m.name} (${m.kind}${m.exported ? ', exp' : ''}) | ${oneLine(String(m.signature ?? m.name), 80)}`,
+        );
+      }
     }
     const didYouMean = (rec.didYouMean as Array<Record<string, unknown>> | undefined) ?? [];
-    if (matches.length === 0 && didYouMean.length > 0) {
+    const availableKinds = (rec.availableKinds as Array<{ kind: string; count: number }> | undefined) ?? [];
+    const looksLikeLiteral = /\s|["'`<>{}()=;,]/.test(q.trim());
+    if (matches.length === 0 && looksLikeLiteral) {
+      lines.push(
+        `  No symbol matches "${q}". It looks like a string literal / UI copy / log text, which is not indexed as a symbol: use grep -rn (or rg) for literals.`,
+      );
+    }
+    if (matches.length === 0 && rec.kind && availableKinds.length > 0) {
+      lines.push(
+        `  Kinds present in this repo: ${availableKinds
+          .slice(0, 20)
+          .map((k) => `${k.kind}(${k.count})`)
+          .join(', ')}`,
+      );
+    }
+    if (matches.length === 0 && didYouMean.length > 0 && !looksLikeLiteral) {
       lines.push(
         `  Did you mean: ${didYouMean
           .slice(0, 6)
@@ -405,19 +550,21 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
           .join(', ')}`,
       );
     }
-    const top = matches[0] ?? didYouMean[0];
+    const top = matches[0] ?? (looksLikeLiteral ? undefined : didYouMean[0]);
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
-    lines.push(`Search Query: "${q}" (${matches.length} matches)`);
+    lines.push(SUMMARY_MARKER);
+    lines.push(`Search Query: "${q}" (${matches.length} matches${byFile.size > 1 ? ` across ${byFile.size} files` : ''})`);
     if (top) {
       lines.push(`Top Match: ${top.name} (${top.kind}) at ${top.filePath}#L${top.startLine}-L${top.endLine}`);
       lines.push(
         `Recommended Action: view_file on ${top.filePath} with StartLine=${top.startLine}, EndLine=${top.endLine}`,
       );
+    } else if (looksLikeLiteral) {
+      lines.push(`Recommended Action: grep -rn ${JSON.stringify(q)} (literal text is not a symbol)`);
     } else {
       lines.push('Recommended Action: Try `ast_outline` on a target file');
     }
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'blast-radius') {
@@ -453,7 +600,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     const testFiles = recommendedTests.map((t) => String(t.testFilePath));
     lines.push(`Covering Test Files (${testFiles.length}): ${testFiles.join(', ') || 'none'}`);
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(
       `Blast Radius Target: ${String(rec.target ?? queryArg)} (${impactedNodes.length} impacted symbols across ${impactedFiles.length} files)`,
     );
@@ -462,7 +609,7 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     }
     lines.push(`Impacted Packages: ${impactedPackages.join(', ') || 'none'}`);
     lines.push(`Recommended Test Command: ${vitestCmd}`);
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'tests-for') {
@@ -489,16 +636,17 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
       lines.push(`  - [${t.kind}] ${t.name} -> ${t.filePath}#L${t.startLine}-L${t.endLine}`);
     }
     if (transitiveTests.length > 0) {
-      lines.push(`Transitive Tests (${Math.min(transitiveTests.length, 15)} shown of ${transitiveTests.length}):`);
-      for (const t of transitiveTests.slice(0, 15)) {
+      lines.push(`Transitive Tests (${Math.min(transitiveTests.length, 8)} shown of ${transitiveTests.length}):`);
+      for (const t of transitiveTests.slice(0, 8)) {
         lines.push(`  - [${t.kind}] ${t.name} -> ${t.filePath}#L${t.startLine}-L${t.endLine}`);
       }
     }
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(`Target: ${String(rec.target ?? queryArg)} (${testFiles.length} covering test files)`);
+    lines.push(`Test Files: ${testFiles.join(', ') || 'none'}`);
     lines.push(`Recommended Test Command: ${vitestCmd}`);
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'callers' || command === 'callees') {
@@ -518,14 +666,14 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
       lines.push(`  - ${name} (${kind}) -> ${file}#L${line} (callSite L${item.callSiteLine ?? line})`);
     }
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     if (sym) {
       lines.push(`Target Symbol: ${sym.name} (${sym.kind}) at ${sym.filePath}#L${sym.startLine}-L${sym.endLine}`);
     } else {
       lines.push(`Target Symbol: ${String(rec.symbol ?? queryArg)} (unresolved)`);
     }
     lines.push(`Total ${command}: ${total}`);
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'lineage') {
@@ -556,14 +704,14 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
     addEdges('Infra Provisions', infraProvisions);
     addEdges('Downstream Consumers', downstreamConsumers);
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(
       `Lineage Target: ${String(rec.target ?? queryArg)} (validators=${validators.length}, routes=${routesHandled.length}, clients=${endpointClients.length}, infra=${infraProvisions.length}, consumers=${downstreamConsumers.length})`,
     );
     if (focal) {
       lines.push(`Root Location: ${focal.filePath}#L${focal.startLine}-L${focal.endLine}`);
     }
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
   if (command === 'path') {
@@ -578,14 +726,14 @@ export function formatCompactCliOutput(command: string, data: unknown, queryArg 
       );
     }
     lines.push('');
-    lines.push('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+    lines.push(SUMMARY_MARKER);
     lines.push(
       `Shortest Path: ${String(rec.fromTarget ?? '')} -> ${String(rec.toTarget ?? '')} (found=${Boolean(rec.found)}, hops=${rec.hopCount ?? steps.length})`,
     );
-    return enforceInlineSizeCap(lines.join('\n'));
+    return lines.join('\n');
   }
 
-  return enforceInlineSizeCap(JSON.stringify(data, null, 2));
+  return JSON.stringify(data, null, 2);
 }
 
 function getPositionalArgs(args: string[]): string[] {
@@ -640,8 +788,15 @@ export async function executeCliCommand(
   const host = options?.daemonHost ?? DEFAULT_HOST;
   const port = options?.daemonPort ?? DEFAULT_PORT;
 
-  const formatOut = (cmd: string, payload: unknown): string =>
-    rawJson ? JSON.stringify(payload, null, 2) : formatCompactCliOutput(cmd, payload, primaryTarget);
+  const formatOut = (cmd: string, payload: unknown): string => {
+    if (rawJson) return JSON.stringify(payload, null, 2);
+    // Ensure workspaceRoot is present so the formatter can tag the repo and tee full output.
+    const withRoot =
+      payload && typeof payload === 'object' && !Array.isArray(payload) && !('workspaceRoot' in payload)
+        ? { workspaceRoot, ...(payload as Record<string, unknown>) }
+        : payload;
+    return formatCompactCliOutput(cmd, withRoot, primaryTarget);
+  };
 
   if (command === 'assess') {
     const manifest = assessWorkspace(workspaceRoot);
@@ -673,7 +828,7 @@ export async function executeCliCommand(
       }
     } else if (command === 'refs' || command === 'references') {
       const target = primaryTarget;
-      const limit = parseFlagValue(rawArgs, '--limit') ?? '40';
+      const limit = parseFlagValue(rawArgs, '--limit') ?? '25';
       const qs = new URLSearchParams({ q: target, limit }).toString();
       const res = await fetchDaemonJson<Record<string, unknown>>('GET', `/refs?${qs}`, undefined, host, port);
       if (res) {
@@ -683,7 +838,7 @@ export async function executeCliCommand(
       const file = primaryTarget;
       const filter = parseFlagValue(rawArgs, '--filter') ?? '';
       const kind = parseFlagValue(rawArgs, '--kind') ?? '';
-      const limit = parseFlagValue(rawArgs, '--limit') ?? '80';
+      const limit = parseFlagValue(rawArgs, '--limit') ?? '40';
       const exported = rawArgs.includes('--exported') || rawArgs.includes('--exported-only');
       const params: Record<string, string> = { file, limit };
       if (filter) params.filter = filter;
@@ -697,7 +852,7 @@ export async function executeCliCommand(
     } else if (command === 'search') {
       const query = primaryTarget;
       const kind = parseFlagValue(rawArgs, '--kind') ?? '';
-      const limit = parseFlagValue(rawArgs, '--limit') ?? '25';
+      const limit = parseFlagValue(rawArgs, '--limit') ?? '15';
       const params: Record<string, string> = { q: query, limit };
       if (kind) params.kind = kind;
       const qs = new URLSearchParams(params).toString();
@@ -799,7 +954,7 @@ export async function executeCliCommand(
       case 'refs':
       case 'references': {
         const targets = rawTargets.length > 0 ? rawTargets : [''];
-        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '40');
+        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '25');
         const queryOne = (t: string) => {
           const res = db.getSymbolReferences(t, { limit });
           return res.resolvedSymbols.length === 0 &&
@@ -826,7 +981,7 @@ export async function executeCliCommand(
         const filter = parseFlagValue(rawArgs, '--filter');
         const kind = parseFlagValue(rawArgs, '--kind');
         const exportedOnly = rawArgs.includes('--exported') || rawArgs.includes('--exported-only');
-        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '80');
+        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '40');
         if (targets.length > 1) {
           const batchItems = targets.map((fp) => ({
             target: fp,
@@ -847,12 +1002,20 @@ export async function executeCliCommand(
       case 'search': {
         const query = primaryTarget;
         const kind = parseFlagValue(rawArgs, '--kind');
-        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '25');
+        const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '15');
         const matches = db.searchSymbols(query, kind, limit);
         const data =
           matches.length === 0
-            ? { query, kind, count: 0, matches, didYouMean: db.suggestClosestSymbols(query, 6) }
-            : { query, kind, count: matches.length, matches };
+            ? {
+                workspaceRoot,
+                query,
+                kind,
+                count: 0,
+                matches,
+                didYouMean: db.suggestClosestSymbols(query, 6),
+                ...(kind ? { availableKinds: db.listKindCounts() } : {}),
+              }
+            : { workspaceRoot, query, kind, count: matches.length, matches };
         return { exitCode: 0, output: formatOut('search', data), data };
       }
 

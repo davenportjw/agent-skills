@@ -141,7 +141,7 @@ export async function startSidecarDaemon(options = {}) {
                 const kind = url.searchParams.get('kind') ?? undefined;
                 const limit = Number(url.searchParams.get('limit') ?? 20);
                 if (kind) {
-                    const matches = db.searchSymbols(q, kind, Number.isFinite(limit) ? limit : 25);
+                    const matches = db.searchSymbols(q, kind, Number.isFinite(limit) ? limit : 15);
                     sendJson(res, 200, { query: q, kind, count: matches.length, matches });
                 }
                 else {
@@ -186,7 +186,7 @@ export async function startSidecarDaemon(options = {}) {
                     '';
                 const kind = url.searchParams.get('kind') ?? undefined;
                 const limit = Number(url.searchParams.get('limit') ?? 25);
-                const matches = db.searchSymbols(q, kind, Number.isFinite(limit) ? limit : 25);
+                const matches = db.searchSymbols(q, kind, Number.isFinite(limit) ? limit : 15);
                 sendJson(res, 200, { query: q, kind: kind ?? null, count: matches.length, matches });
                 return;
             }

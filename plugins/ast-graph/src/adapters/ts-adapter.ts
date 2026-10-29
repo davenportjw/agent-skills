@@ -66,6 +66,22 @@ function hasExportModifier(node: ts.Node): boolean {
   );
 }
 
+/**
+ * Class/interface members carry no `export` keyword, so visibility is derived from
+ * access modifiers: `private`/`protected` members and ECMAScript `#private` names are
+ * not part of the public surface.
+ */
+export function isPublicMember(node: ts.Node): boolean {
+  const named = node as ts.Node & { name?: ts.Node };
+  if (named.name && ts.isPrivateIdentifier(named.name)) return false;
+  if (!ts.canHaveModifiers(node)) return true;
+  const mods = ts.getModifiers(node);
+  if (!mods) return true;
+  return !mods.some(
+    (m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword,
+  );
+}
+
 function getJSDocComment(node: ts.Node, sourceFile: ts.SourceFile): string {
   const fullText = sourceFile.getFullText();
   const ranges = ts.getLeadingCommentRanges(fullText, node.getFullStart());
@@ -868,7 +884,7 @@ export class TypeScriptCompilerAdapter implements CompilerAdapter {
             endCol: endPos.col,
             signature: sigText,
             docstring: getJSDocComment(node, sf),
-            exported: true,
+            exported: isPublicMember(node),
             complexity: computeCyclomaticComplexity(node),
             labels: ['Method'],
             properties: { className: enclosing.name },
@@ -917,7 +933,7 @@ export class TypeScriptCompilerAdapter implements CompilerAdapter {
               endCol: endPos.col,
               signature: sigText,
               docstring: getJSDocComment(node, sf),
-              exported: true,
+              exported: isPublicMember(node),
               complexity: 1,
               labels: ['Property'],
               properties: { container: enclosing.name, containerKind: enclosing.kind },

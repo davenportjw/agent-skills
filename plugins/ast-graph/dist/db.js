@@ -576,6 +576,14 @@ export class AstGraphDatabase {
         };
         return aliases[cleaned] ?? raw.trim();
     }
+    /** Distinct node kinds with counts, used to explain zero-result `kind` filters. */
+    listKindCounts(limit = 40) {
+        return this.db
+            .prepare(`SELECT kind, COUNT(*) AS count FROM nodes
+         WHERE kind NOT IN ('File', 'WorkspacePackage')
+         GROUP BY kind ORDER BY count DESC LIMIT ?`)
+            .all(limit);
+    }
     searchSymbols(query, rawKind, limit = 20) {
         const t0 = performance.now();
         const kind = this.normalizeKindFilter(rawKind);

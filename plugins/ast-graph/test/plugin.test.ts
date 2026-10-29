@@ -282,8 +282,8 @@ func TestUpdateModel(t *testing.T) {
       };
       const tsText = tsResultObj.content[0]?.text ?? '';
       expect(tsText).toContain('[AST SYMBOL] onlyInTsRepo');
-      expect(tsText).toContain('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
-      expect(tsText.length).toBeLessThan(5500);
+      expect(tsText).toContain('=== TARGET SUMMARY ===');
+      expect(Buffer.byteLength(tsText)).toBeLessThanOrEqual(3800);
       expect(tsResultObj.structuredContent.symbol?.name).toBe('onlyInTsRepo');
 
       const pyRes = mcp.handleRequest({
@@ -334,7 +334,7 @@ func TestUpdateModel(t *testing.T) {
       const autoPyOutlineText =
         (autoPyOutline?.result as { content: Array<{ text: string }> }).content[0]?.text ?? '';
       expect(autoPyOutlineText).toContain('only_in_py_repo');
-      expect(autoPyOutlineText).toContain('=== TARGET SUMMARY (REPEAT FOR TAIL VISIBILITY) ===');
+      expect(autoPyOutlineText).toContain('=== TARGET SUMMARY ===');
     } finally {
       mcp.close();
     }
