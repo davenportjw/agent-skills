@@ -100,7 +100,67 @@ export class AstGraphDatabase {
     }
   }
 
+  /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
+  public static readonly SCHEMA_VERSION = 2;
+
+  /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
+  private static readonly DERIVED_TABLES = [
+    'nodes_fts',
+    'node_labels',
+    'edges',
+    'diagnostics',
+    'nodes',
+    'files',
+    'sync_runs',
+    'query_telemetry',
+  ];
+
+  /** Set when the constructor discarded an outdated/foreign index; callers should run a full sync. */
+  public schemaRebuilt: { fromVersion: number; reason: string } | null = null;
+
+  /**
+   * Bring an existing database file to SCHEMA_VERSION before CREATE TABLE IF NOT EXISTS runs.
+   * The index is fully derived from source files, so the migration strategy for any older or
+   * foreign layout (e.g. legacy forks with a `labels_json` column) is drop-and-resync rather than
+   * column-level ALTERs. A database written by a *newer* plugin is refused with an actionable error.
+   */
+  private migrateSchema(): void {
+    const userVersion = Number(
+      (this.db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version ?? 0,
+    );
+    if (userVersion === AstGraphDatabase.SCHEMA_VERSION) return;
+    if (userVersion > AstGraphDatabase.SCHEMA_VERSION) {
+      throw new Error(
+        `SCHEMA_TOO_NEW: ${this.dbPath} was written by a newer ast-graph (schema v${userVersion}, this build supports v${AstGraphDatabase.SCHEMA_VERSION}). ` +
+          'Upgrade the plugin, or delete the .ast-graph/ directory to rebuild with this version.',
+      );
+    }
+    const existing = new Set(
+      (this.db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>).map(
+        (r) => r.name,
+      ),
+    );
+    const stale = AstGraphDatabase.DERIVED_TABLES.filter((t) => existing.has(t));
+    if (stale.length === 0) return; // fresh database
+    this.db.exec('PRAGMA foreign_keys = OFF;');
+    for (const table of stale) {
+      this.db.exec(`DROP TABLE IF EXISTS "${table}";`);
+    }
+    if (existing.has('meta')) {
+      const metaCols = (this.db.prepare('PRAGMA table_info(meta)').all() as Array<{ name: string }>).map((c) => c.name);
+      if (!metaCols.includes('key') || !metaCols.includes('value')) {
+        this.db.exec('DROP TABLE meta;');
+      }
+    }
+    this.db.exec('PRAGMA foreign_keys = ON;');
+    this.schemaRebuilt = {
+      fromVersion: userVersion,
+      reason: `schema v${userVersion} -> v${AstGraphDatabase.SCHEMA_VERSION}: dropped ${stale.length} derived tables; full re-sync required`,
+    };
+  }
+
   private initializeSchema(): void {
+    this.migrateSchema();
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
@@ -212,6 +272,8 @@ export class AstGraphDatabase {
       CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
       CREATE INDEX IF NOT EXISTS idx_nodes_qualified ON nodes(qualified_name);
     `);
+    this.db.exec(`PRAGMA user_version = ${AstGraphDatabase.SCHEMA_VERSION};`);
+    this.setMeta('schema_version', String(AstGraphDatabase.SCHEMA_VERSION));
   }
 
   public close(): void {

@@ -54,6 +54,24 @@ All MCP tools accept an optional `workspace` parameter (repository path or repos
 - `ast_analyze`: Compute package coupling/instability, untested hubs, dead exports, and cycles.
 - `ast_sync`: Trigger incremental or full synchronization.
 
+### Workspace Resolution
+
+When `workspace` is omitted, the target repository is resolved in this order:
+
+1. An absolute file path in the arguments (its enclosing repo).
+2. The client's MCP workspace roots (`roots/list`). One root becomes the default; with several, the server probes them for the symbol or file.
+3. The server's launch directory (`AST_GRAPH_WORKSPACE` / `--workspace` / cwd), but **only if it is not a plugin install directory** (this plugin's root, `~/.gemini/config/plugins`, `~/.claude/plugins`, `~/.codex/plugins`).
+4. A probe of registered repos (`~/.gemini/config/ast-graph-workspaces.json` or `AST_GRAPH_REGISTRY_PATH`, plus `~/GitHub/*/.ast-graph`) for a matching relative path or symbol.
+
+If none of these match, the tool returns `NO_WORKSPACE` with the list of known repositories. A `workspace` value that is not an existing path or a registered repo name returns `UNKNOWN_WORKSPACE`. The server never silently queries the plugin directory.
+
+### Schema Versioning
+
+`ast.db` carries `PRAGMA user_version` (also `meta.schema_version`); the current version is `AstGraphDatabase.SCHEMA_VERSION`. On open:
+
+- **Older or legacy layouts** (for example, the `labels_json` column from older forks): the derived index tables are dropped, the repo binding in `meta` is kept, and the next query runs a full cold sync automatically.
+- **A newer version** (written by a newer plugin build): the open is refused with `SCHEMA_TOO_NEW`. Upgrade the plugin, or delete `.ast-graph/`.
+
 ### Output Contract (compact, summary-first, inline-budgeted)
 
 - Every text result is **at most about 3.8 KB**, so agent harnesses keep it inline instead of spilling it to a file.

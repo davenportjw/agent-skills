@@ -7,6 +7,22 @@ export declare class AstGraphDatabase {
     getMeta(key: string): string | null;
     setMeta(key: string, value: string): void;
     verifyRepoBinding(workspaceRoot: string): void;
+    /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
+    static readonly SCHEMA_VERSION = 2;
+    /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
+    private static readonly DERIVED_TABLES;
+    /** Set when the constructor discarded an outdated/foreign index; callers should run a full sync. */
+    schemaRebuilt: {
+        fromVersion: number;
+        reason: string;
+    } | null;
+    /**
+     * Bring an existing database file to SCHEMA_VERSION before CREATE TABLE IF NOT EXISTS runs.
+     * The index is fully derived from source files, so the migration strategy for any older or
+     * foreign layout (e.g. legacy forks with a `labels_json` column) is drop-and-resync rather than
+     * column-level ALTERs. A database written by a *newer* plugin is refused with an actionable error.
+     */
+    private migrateSchema;
     private initializeSchema;
     close(): void;
     getTrackedFilesMap(): Map<string, {

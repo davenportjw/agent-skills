@@ -12,6 +12,15 @@ The **AST GraphDB Plugin** (`plugins/ast-graph`) is a self-contained **Antigravi
 2. **Tamper-Proof Per-Repository Binding**:
    - Every repository's SQLite database (`<repo>/.ast-graph/ast.db`) stores `canonicalRoot` and `repoId` (`sha256(realpath(repoRoot))`) in its `meta` table.
    - `verifyRepoBinding()` rejects any attempt to open or write a database from a mismatched repository (`TAMPER_GUARD`).
+3. **Schema Versioning**:
+   - `ast.db` is stamped with `PRAGMA user_version` = `AstGraphDatabase.SCHEMA_VERSION`.
+   - Older or legacy-fork layouts are migrated by dropping the derived index tables, which triggers an automatic full re-sync. The repo binding is kept.
+   - A database written by a newer build is refused with `SCHEMA_TOO_NEW`.
+   - Tests: `test/schema-migration.test.ts`.
+4. **Workspace Resolution (MCP)**:
+   - When `workspace` is omitted, the server resolves the repo in this order: an absolute path in the arguments, then MCP client roots (`roots/list`), then the launch dir (unless it is a plugin install dir), then the registered repos.
+   - It never falls back to the plugin directory. If nothing resolves, it returns `NO_WORKSPACE`; an unresolvable `workspace` value returns `UNKNOWN_WORKSPACE`. Both list the known repos.
+   - Tests: `test/workspace-resolution.test.ts`.
 
 ---
 

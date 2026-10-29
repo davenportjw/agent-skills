@@ -11,6 +11,7 @@ Always use the **AST GraphDB Plugin** (`ast-graph` MCP server or `node ~/.gemini
 - Every repository owns its own isolated SQLite WAL database at `<repo-root>/.ast-graph/ast.db` and assessment manifest at `<repo-root>/.ast-graph/manifest.json`.
 - `.ast-graph/` is automatically excluded via `<repo-root>/.git/info/exclude` so git status stays clean without modifying committed `.gitignore` files.
 - When working across multiple repositories, pass `workspace: "<repo-name-or-path>"` to `ast_*` MCP tools or `--workspace <path>` to the CLI.
+- If a tool returns `NO_WORKSPACE` or `UNKNOWN_WORKSPACE`, retry with `workspace` set to one of the listed repos. Do not fall back to grep. The server never defaults to the plugin install directory.
 
 ## 2. Strict Anti-Chunking & AST-First Lookup Mandate
 1. **NEVER Chunk-Read Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, and never page through files in 800-line chunks (`1-800`, `801-1600`, ...).

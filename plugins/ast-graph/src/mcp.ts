@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { analyzeGraph, runBenchmark } from './analyzer.js';
 import {
   assessWorkspace,
@@ -12,6 +13,30 @@ import {
 import { formatCompactCliOutput } from './cli.js';
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
+
+/** Real path of this plugin's install root (`<root>/dist/mcp.js` or `<root>/src/mcp.ts` -> `<root>`). */
+export const PLUGIN_ROOT = canonicalizeWorkspaceRoot(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+);
+
+/**
+ * True when `dir` is a plugin installation location rather than a user workspace: this plugin's own
+ * root (or any directory inside it), or a harness plugin cache (~/.gemini/config/plugins, ~/.claude/plugins).
+ * MCP hosts frequently spawn servers with cwd set to the plugin directory; that must never become the
+ * default index target.
+ */
+export function isPluginInstallDir(dir: string, pluginRoot: string = PLUGIN_ROOT): boolean {
+  const real = canonicalizeWorkspaceRoot(dir);
+  const within = (root: string) => real === root || real.startsWith(`${root}${path.sep}`);
+  if (within(pluginRoot)) return true;
+  const home = os.homedir();
+  const caches = [
+    path.join(home, '.gemini', 'config', 'plugins'),
+    path.join(home, '.claude', 'plugins'),
+    path.join(home, '.codex', 'plugins'),
+  ];
+  return caches.some((c) => within(path.resolve(c)) || within(canonicalizeWorkspaceRoot(c)));
+}
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -387,18 +412,92 @@ interface WorkspaceHandle {
 }
 
 export class AstMcpServer {
+  /** Directory the server was launched for (cwd / --workspace / AST_GRAPH_WORKSPACE). */
   public readonly workspaceRoot: string;
-  public readonly db: AstGraphDatabase;
-  public readonly indexer: AstGraphIndexer;
+  /**
+   * Default workspace used when a tool call does not name one. `null` when the launch directory is a
+   * plugin install dir; in that case MCP client roots (`roots/list`) or explicit `workspace` args are required.
+   */
+  public readonly defaultWorkspaceRoot: string | null;
   private readonly explicitDbPath?: string;
   private readonly pool = new Map<string, WorkspaceHandle>();
+  private clientRoots: string[] = [];
+  private clientSupportsRoots = false;
+  private nextOutboundId = 1;
+  private readonly pendingOutbound = new Map<string | number, (result: unknown) => void>();
+  /** Sink for server-initiated JSON-RPC messages (requests to the client). Set by the stdio loop. */
+  public sendToClient: ((msg: Record<string, unknown>) => void) | null = null;
 
   constructor(workspaceRoot: string, dbPath?: string) {
     this.workspaceRoot = canonicalizeWorkspaceRoot(workspaceRoot);
     this.explicitDbPath = dbPath;
-    const defaultHandle = this.getOrOpenWorkspace(this.workspaceRoot, dbPath);
-    this.db = defaultHandle.db;
-    this.indexer = defaultHandle.indexer;
+    this.defaultWorkspaceRoot =
+      dbPath || !isPluginInstallDir(this.workspaceRoot) ? this.workspaceRoot : null;
+    if (this.defaultWorkspaceRoot) {
+      this.getOrOpenWorkspace(this.defaultWorkspaceRoot, dbPath);
+    }
+  }
+
+  private requireDefaultHandle(): WorkspaceHandle {
+    const root = this.clientRoots.length === 1 ? this.clientRoots[0]! : this.defaultWorkspaceRoot;
+    if (!root) {
+      throw new Error(this.noWorkspaceMessage());
+    }
+    return this.getOrOpenWorkspace(root, root === this.defaultWorkspaceRoot ? this.explicitDbPath : undefined);
+  }
+
+  /** Default workspace database (throws NO_WORKSPACE when launched from a plugin install dir without client roots). */
+  public get db(): AstGraphDatabase {
+    return this.requireDefaultHandle().db;
+  }
+
+  public get indexer(): AstGraphIndexer {
+    return this.requireDefaultHandle().indexer;
+  }
+
+  /** Workspace roots reported by the MCP client via `roots/list` (canonical repo roots). */
+  public getClientRoots(): string[] {
+    return [...this.clientRoots];
+  }
+
+  public setClientRoots(uris: string[]): void {
+    const roots: string[] = [];
+    for (const uri of uris) {
+      try {
+        const p = uri.startsWith('file://') ? fileURLToPath(uri) : uri;
+        if (!fs.existsSync(p) || isPluginInstallDir(p)) continue;
+        const root = findEnclosingRepoRoot(p) ?? canonicalizeWorkspaceRoot(p);
+        if (!roots.includes(root)) roots.push(root);
+      } catch {
+        // Ignore malformed root URIs
+      }
+    }
+    this.clientRoots = roots;
+  }
+
+  private requestClientRoots(): void {
+    if (!this.clientSupportsRoots || !this.sendToClient) return;
+    const id = `ast-graph-roots-${this.nextOutboundId++}`;
+    this.pendingOutbound.set(id, (result) => {
+      const list = (result as { roots?: Array<{ uri?: string }> } | undefined)?.roots ?? [];
+      this.setClientRoots(list.map((r) => String(r.uri ?? '')).filter(Boolean));
+    });
+    this.sendToClient({ jsonrpc: '2.0', id, method: 'roots/list' });
+  }
+
+  private noWorkspaceMessage(): string {
+    const known = new Set<string>();
+    for (const reg of getRegisteredWorkspaces()) {
+      if (!isPluginInstallDir(reg.canonicalRoot)) known.add(reg.canonicalRoot);
+    }
+    for (const key of this.pool.keys()) known.add(key.split('::')[0]!);
+    const list = [...known].slice(0, 12).map((r) => `  - ${path.basename(r)}  (${r})`).join('\n');
+    return (
+      `NO_WORKSPACE: could not infer which repository to query. The MCP server was launched from a plugin ` +
+      `install directory (${this.workspaceRoot}) and the client reported no workspace roots. ` +
+      `Pass \`workspace: "<repo-name-or-absolute-path>"\` (or an absolute file path).` +
+      (list ? `\nKnown repositories:\n${list}` : '\nNo repositories are registered yet; pass an absolute path to index one.')
+    );
   }
 
   private getOrOpenWorkspace(rawWorkspace: string, explicitDbPath?: string): WorkspaceHandle {
@@ -439,20 +538,21 @@ export class AstMcpServer {
       }
     };
 
-    const isDefaultPluginDir =
-      this.workspaceRoot.endsWith('/agent-skills') ||
-      this.workspaceRoot.includes('/plugins/ast-graph');
+    const isDefaultPluginDir = this.defaultWorkspaceRoot === null;
+    for (const root of this.clientRoots) {
+      addCandidate(root);
+    }
     if (!isDefaultPluginDir) {
       addCandidate(this.workspaceRoot);
     }
     for (const key of this.pool.keys()) {
       const rootPart = key.split('::')[0];
-      if (rootPart && !rootPart.endsWith('/agent-skills')) {
+      if (rootPart && !isPluginInstallDir(rootPart)) {
         addCandidate(rootPart);
       }
     }
     for (const reg of getRegisteredWorkspaces()) {
-      if (!reg.canonicalRoot.endsWith('/agent-skills')) {
+      if (!isPluginInstallDir(reg.canonicalRoot)) {
         addCandidate(reg.canonicalRoot);
       }
     }
@@ -471,7 +571,9 @@ export class AstMcpServer {
         // Ignore directory scan errors
       }
     }
-    addCandidate(this.workspaceRoot);
+    if (!isDefaultPluginDir) {
+      addCandidate(this.workspaceRoot);
+    }
     return candidates;
   }
 
@@ -498,6 +600,16 @@ export class AstMcpServer {
       if (matched && fs.existsSync(matched.canonicalRoot)) {
         return this.getOrOpenWorkspace(matched.canonicalRoot);
       }
+      const clientMatch = this.clientRoots.find(
+        (r) => path.basename(r).toLowerCase() === wsArg.toLowerCase(),
+      );
+      if (clientMatch) {
+        return this.getOrOpenWorkspace(clientMatch);
+      }
+      throw new Error(
+        `UNKNOWN_WORKSPACE: "${wsArg}" is not an existing path or a registered repository name.\n` +
+          this.noWorkspaceMessage().split('\n').slice(1).join('\n'),
+      );
     }
 
     const norm = normalizeMcpToolArgs(toolName, args);
@@ -544,10 +656,18 @@ export class AstMcpServer {
       }
     }
 
-    // 3. Symbol / route / schema query across registered repositories when workspace is omitted
+    // 3. Symbol / route / schema query across candidate repositories when workspace is omitted.
+    //    Candidates are ordered client roots -> launch dir -> pool -> registry, so the default wins ties.
+    //    The default index is synced first so an empty (new or schema-rebuilt) index never causes a
+    //    false miss that silently routes the query to another repository.
     const primaryToken = norm.symbolTargets[0] ?? norm.fromTarget ?? '';
+    const hasUnambiguousDefault =
+      this.clientRoots.length === 1 || (this.clientRoots.length === 0 && this.defaultWorkspaceRoot !== null);
 
-    if (primaryToken && candidateRoots.length > 1) {
+    if (primaryToken && candidateRoots.length > (hasUnambiguousDefault ? 1 : 0)) {
+      if (hasUnambiguousDefault) {
+        this.requireDefaultHandle().indexer.lazySyncIfDirty();
+      }
       // First pass: exact target resolution
       for (const root of candidateRoots) {
         if (!fs.existsSync(path.join(root, '.ast-graph', 'ast.db'))) continue;
@@ -569,17 +689,39 @@ export class AstMcpServer {
       }
     }
 
-    return this.getOrOpenWorkspace(this.workspaceRoot, this.explicitDbPath);
+    if (this.clientRoots.length > 1) {
+      return this.getOrOpenWorkspace(this.clientRoots[0]!);
+    }
+    return this.requireDefaultHandle();
   }
 
   public handleRequest(req: JsonRpcRequest): JsonRpcResponse | null {
     const id = req.id ?? null;
 
-    if (req.method === 'notifications/initialized' || req.method.startsWith('notifications/')) {
+    // Response to a server-initiated request (e.g. roots/list)
+    if (!req.method) {
+      const msg = req as unknown as { id?: string | number; result?: unknown };
+      if (msg.id !== undefined) {
+        const resolve = this.pendingOutbound.get(msg.id);
+        if (resolve) {
+          this.pendingOutbound.delete(msg.id);
+          resolve(msg.result);
+        }
+      }
+      return null;
+    }
+
+    if (req.method === 'notifications/initialized' || req.method === 'notifications/roots/list_changed') {
+      this.requestClientRoots();
+      return null;
+    }
+    if (req.method.startsWith('notifications/')) {
       return null;
     }
 
     if (req.method === 'initialize') {
+      const caps = (req.params?.capabilities ?? {}) as Record<string, unknown>;
+      this.clientSupportsRoots = Boolean(caps.roots);
       return {
         jsonrpc: '2.0',
         id,
@@ -952,10 +1094,13 @@ if (isMain) {
   }
 
   const mcp = new AstMcpServer(workspaceRoot);
-  // Warm up index asynchronously after startup if inside a git repository
+  mcp.sendToClient = (msg) => {
+    process.stdout.write(JSON.stringify(msg) + '\n');
+  };
+  // Warm up index asynchronously after startup, only for a real (non-plugin) launch workspace
   setImmediate(() => {
     try {
-      if (fs.existsSync(path.join(mcp.workspaceRoot, '.git'))) {
+      if (mcp.defaultWorkspaceRoot && fs.existsSync(path.join(mcp.defaultWorkspaceRoot, '.git'))) {
         mcp.indexer.lazySyncIfDirty();
       }
     } catch {

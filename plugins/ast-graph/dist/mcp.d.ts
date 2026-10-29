@@ -1,5 +1,14 @@
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
+/** Real path of this plugin's install root (`<root>/dist/mcp.js` or `<root>/src/mcp.ts` -> `<root>`). */
+export declare const PLUGIN_ROOT: string;
+/**
+ * True when `dir` is a plugin installation location rather than a user workspace: this plugin's own
+ * root (or any directory inside it), or a harness plugin cache (~/.gemini/config/plugins, ~/.claude/plugins).
+ * MCP hosts frequently spawn servers with cwd set to the plugin directory; that must never become the
+ * default index target.
+ */
+export declare function isPluginInstallDir(dir: string, pluginRoot?: string): boolean;
 export interface JsonRpcRequest {
     jsonrpc: '2.0';
     id?: string | number | null;
@@ -294,12 +303,31 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
     };
 }];
 export declare class AstMcpServer {
+    /** Directory the server was launched for (cwd / --workspace / AST_GRAPH_WORKSPACE). */
     readonly workspaceRoot: string;
-    readonly db: AstGraphDatabase;
-    readonly indexer: AstGraphIndexer;
+    /**
+     * Default workspace used when a tool call does not name one. `null` when the launch directory is a
+     * plugin install dir; in that case MCP client roots (`roots/list`) or explicit `workspace` args are required.
+     */
+    readonly defaultWorkspaceRoot: string | null;
     private readonly explicitDbPath?;
     private readonly pool;
+    private clientRoots;
+    private clientSupportsRoots;
+    private nextOutboundId;
+    private readonly pendingOutbound;
+    /** Sink for server-initiated JSON-RPC messages (requests to the client). Set by the stdio loop. */
+    sendToClient: ((msg: Record<string, unknown>) => void) | null;
     constructor(workspaceRoot: string, dbPath?: string);
+    private requireDefaultHandle;
+    /** Default workspace database (throws NO_WORKSPACE when launched from a plugin install dir without client roots). */
+    get db(): AstGraphDatabase;
+    get indexer(): AstGraphIndexer;
+    /** Workspace roots reported by the MCP client via `roots/list` (canonical repo roots). */
+    getClientRoots(): string[];
+    setClientRoots(uris: string[]): void;
+    private requestClientRoots;
+    private noWorkspaceMessage;
     private getOrOpenWorkspace;
     private getCandidateWorkspaceRoots;
     private resolveWorkspaceHandle;
