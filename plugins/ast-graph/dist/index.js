@@ -8,6 +8,10 @@ export { PythonCompilerAdapter, extractPythonSource } from './adapters/python-ad
 export { GoCompilerAdapter } from './adapters/go-adapter.js';
 export { SqlCompilerAdapter } from './adapters/sql-adapter.js';
 export { WebCompilerAdapter, buildFallbackStructuralOutline } from './adapters/web-adapter.js';
+export { DockerfileCompilerAdapter } from './adapters/dockerfile-adapter.js';
+export { ContractCompilerAdapter } from './adapters/contract-adapter.js';
+export { RustCompilerAdapter } from './adapters/rust-adapter.js';
+export { PolyglotCompilerAdapter, detectPolyglotLanguage } from './adapters/polyglot-adapter.js';
 export { analyzeGraph, runBenchmark, synthesizeBenchmarkWorkload, isPolyglotTestFile, } from './analyzer.js';
 export { startSidecarDaemon, } from './daemon.js';
 export { AstMcpServer, MCP_TOOLS_MANIFEST, normalizeMcpToolArgs, } from './mcp.js';

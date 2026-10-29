@@ -1,6 +1,6 @@
 ---
 name: ast-graph-traceability
-description: Queries and maintains the multi-repo, tamper-proof AST & Cross-Layer Lineage GraphDB (<repo>/.ast-graph/ast.db, SCIP + SQLite LPG) across TypeScript/JavaScript, Python, Go/Templ, Terraform, and SQL repositories. Activate this skill whenever locating symbols, tracing property mutations (WRITES_PROPERTY/READS_PROPERTY), computing upstream blast radius, tracing cross-layer route/schema/SQL/Terraform lineage, or selecting targeted Vitest, Pytest, or Go test suites.
+description: Queries and maintains the multi-repo, tamper-proof AST & Cross-Layer Lineage GraphDB (<repo>/.ast-graph/ast.db, SCIP + SQLite LPG) across TypeScript/JavaScript, Python, Go/Templ, Rust, Terraform/HCL, SQL, Dockerfile, Protobuf, GraphQL, Java, Kotlin, C#, Ruby, Elixir, PHP, C/C++, Swift, Zig, and WebAssembly/WIT repositories. Activate this skill whenever locating symbols, tracing property mutations (WRITES_PROPERTY/READS_PROPERTY), computing upstream blast radius, tracing cross-layer route/schema/SQL/Terraform/env lineage, or selecting targeted test suites.
 ---
 
 # AST GraphDB Traceability Skill (`ast-graph-traceability`)
@@ -16,15 +16,27 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
    - Extracts functions, classes, methods, properties, `READS_PROPERTY` / `WRITES_PROPERTY`, Zod schemas (`VALIDATES_SCHEMA`), Fastify HTTP/WebSocket routes (`HANDLES_ROUTE`), `fetch('/api/...')` client calls (`CALLS_ROUTE`), WebMCP `navigator.modelContext.registerTool` tools, and Vitest `describe`/`it`/`test` suites (`TESTS_SYMBOL`).
 2. **Python (`python-ast`)**:
    - Single-pass `python3` `ast` batch extractor.
-   - Extracts classes, functions, async functions, methods, `self.<attr>` reads/writes, Pydantic `BaseModel` & `@dataclass` schemas, FastAPI/Flask routes (`@app.get`, `@router.post`), MCP tools (`@server.tool`, `@mcp.tool`), Jinja2 `TemplateResponse`, embedded SQL table lineage (`scip-sql ddl sql 1.0.0 table:<name>#`), and `pytest` functions/classes (`uv run pytest`).
+   - Extracts classes, functions, async functions, methods, `self.<attr>` reads/writes, Pydantic `BaseModel` & `@dataclass` schemas, FastAPI/Flask routes (`@app.get`, `@router.post`), MCP tools (`@server.tool`, `@mcp.tool`), Jinja2 `TemplateResponse`, `os.getenv` / `os.environ.get` (`CONFIGURES_ENV`), embedded SQL table lineage (`scip-sql ddl sql 1.0.0 table:<name>#`), and `pytest` functions/classes (`uv run pytest`).
 3. **Go & Templ (`go`)**:
-   - Extracts Go packages, structs + fields + JSON tags, interfaces, functions, receiver methods, field reads/writes, `http.HandleFunc` / `mux.HandleFunc` routes, `*_test.go` `Test*`/`Benchmark*` cases (`go test`), and `.templ` components + HTMX `hx-get`/`hx-post`/`hx-delete` `CALLS_ROUTE` edges.
-4. **Terraform HCL (`terraform`)**:
-   - Recursively discovers `.tf` files across `infra/`, `terraform/`, etc.
-   - Extracts `resource`, `data`, `variable`, `output`, `locals`, cross-resource `REFERENCES_TF_RESOURCE` edges, and `PROVISIONS_SERVICE` links to Cloud Run services.
+   - Extracts Go packages, structs + fields + JSON tags, interfaces, generic functions & receiver methods (`[T any]`), field reads/writes, `http.HandleFunc` / `mux.HandleFunc` + Gin/Echo/Chi (`r.GET`, `r.POST`, etc.) routes, `os.Getenv` / `os.LookupEnv` (`CONFIGURES_ENV`), `*_test.go` `Test*`/`Benchmark*` cases (`go test`), and `.templ` components + HTMX `hx-get`/`hx-post`/`hx-delete` `CALLS_ROUTE` edges.
+4. **Terraform / HCL (`terraform`)**:
+   - Recursively discovers `.tf`, `.hcl`, and `.tfvars` files across `infra/`, `terraform/`, etc. using a heredoc- (`<<EOF` / `<<-EOF`), block-comment-, and string-aware brace scanner.
+   - Extracts `resource`, `data`, `module`, `provider`, `variable`, `output`, `locals`, `.tfvars` assignments, container `image = "..."` (`PROVISIONS_SERVICE`), `env { name = "..." }` (`CONFIGURES_ENV` -> `scip-env global env 1.0.0 <NAME>#`), and cross-resource `REFERENCES_TF_RESOURCE` edges.
 5. **SQL DDL (`sql-ddl`)**:
-   - Discovers `.sql` files and extracts `CREATE TABLE` schemas and columns (`scip-sql ddl sql 1.0.0 table:<name>#`), linking them to Python/TS/Go SQL queries in `ast_lineage`.
-6. **Web Composite & Universal Structural Outlines (`web-composite`)**:
+   - Discovers `.sql` and `.sqlx` files with a quote-, dollar-quote- (`$$...$$` / `$tag$...$tag$`), and comment-aware statement splitter plus balanced-paren column parser.
+   - Extracts `CREATE TABLE` schemas and multi-word column types (`TIMESTAMP WITH TIME ZONE`, `NUMERIC(p, s)`, `ARRAY<...>`), inline and table-level `FOREIGN KEY ... REFERENCES` edges, Spanner `INTERLEAVE IN PARENT`, `CREATE VIEW` (`REFERENCES` source tables), `CREATE INDEX`, and `ALTER TABLE`.
+6. **Dockerfile / Containerfile (`scip-docker`)**:
+   - Parses `Dockerfile`, `Dockerfile.*`, and `Containerfile` with backslash continuation joining (`\`) while preserving 1-based `startLine`–`endLine` spans.
+   - Extracts multi-stage `FROM ... AS <stage>` (`ServiceInstance`), `COPY --from=<stage>` (`REFERENCES`), `ENV` / `ARG` (`CONFIGURES_ENV` -> `scip-env global env 1.0.0 <NAME>#`), `EXPOSE` (`RouteEndpoint`), and `ENTRYPOINT` / `CMD` / `HEALTHCHECK`.
+7. **API Contracts: Protobuf & GraphQL (`scip-contract`)**:
+   - Parses `.proto` (`service`, `rpc`, `message` fields, `enum`, `google.api.http` REST bindings -> `HANDLES_ROUTE`, `VALIDATES_SCHEMA`, `EMITS_SCHEMA`) and `.graphql` / `.gql` (`type`, `interface`, `input`, `enum`, `union`, `scalar`, `Query` / `Mutation` / `Subscription` operations) with multi-line block spans.
+8. **Rust (`scip-rust`)**:
+   - Parses `.rs` files using a lifetime- (`'a`, `'static`), char-literal- (`'{'`), raw-string- (`r#"..."#`), and comment-safe brace scanner.
+   - Extracts `struct` + fields, `enum`, `trait`, `impl Trait for Type` (`IMPLEMENTS`), `fn`, `macro_rules!`, `const`/`static`, `type`, `#[test]` / `#[tokio::test]` (`cargo test`), Actix-web & Axum routes (`HANDLES_ROUTE`), `std::env::var` (`CONFIGURES_ENV`), and `sqlx::query!` SQL table references (`REFERENCES`).
+9. **Polyglot Structural & Cross-Layer Adapter (`scip-polyglot`)**:
+   - Supports **Java** (`.java`), **Kotlin** (`.kt`, `.kts`), **C#** (`.cs`), **Ruby** (`.rb`), **Elixir** (`.ex`, `.exs`), **PHP** (`.php`), **C/C++** (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`), **Swift** (`.swift`), **Zig** (`.zig`), and **WebAssembly / WIT** (`.wat`, `.wit`).
+   - Computes multi-line 1-based `startLine`–`endLine` spans (brace-delimited, `def`/`class`/`module ... end` for Ruby/Elixir, and S-expression parens for WAT) and links Spring Boot / ASP.NET / Rails / Phoenix / Laravel / Symfony routes (`HANDLES_ROUTE`), JPA / EF / ActiveRecord / Ecto ORM tables (`REFERENCES`), and environment variables (`CONFIGURES_ENV`).
+10. **Web Composite & Universal Structural Outlines (`web-composite`)**:
    - Demultiplexes `.html`, `.htm`, `.jinja`, `.jinja2`, `.njk`, `.astro`, `.vue`, and `.svelte` files: delegates `<script>` blocks to TypeScript's AST parser with exact 1-based line offsets, `<style>` blocks to the CSS structural parser, and extracts DOM/template landmarks (`TemplateLandmark`), `fetch` / `hx-*` `CALLS_ROUTE` edges, and WebMCP tool registrations.
    - Parses `.css` stylesheets into `StylesheetSection`, `CssAtRule`, and grouped selector spans, and provides on-demand `DocumentSection` structural outlines for `.md`, `.yaml`/`.yml`, `.json`, and `.toml` files.
 

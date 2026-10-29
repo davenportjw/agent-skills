@@ -1,5 +1,9 @@
+import { ContractCompilerAdapter } from './adapters/contract-adapter.js';
+import { DockerfileCompilerAdapter } from './adapters/dockerfile-adapter.js';
 import { GoCompilerAdapter } from './adapters/go-adapter.js';
+import { PolyglotCompilerAdapter } from './adapters/polyglot-adapter.js';
 import { PythonCompilerAdapter } from './adapters/python-adapter.js';
+import { RustCompilerAdapter } from './adapters/rust-adapter.js';
 import { SqlCompilerAdapter } from './adapters/sql-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
 import { TypeScriptCompilerAdapter } from './adapters/ts-adapter.js';
@@ -30,6 +34,10 @@ export declare class AstGraphIndexer {
     readonly goAdapter: GoCompilerAdapter;
     readonly sqlAdapter: SqlCompilerAdapter;
     readonly webAdapter: WebCompilerAdapter;
+    readonly dockerAdapter: DockerfileCompilerAdapter;
+    readonly contractAdapter: ContractCompilerAdapter;
+    readonly rustAdapter: RustCompilerAdapter;
+    readonly polyglotAdapter: PolyglotCompilerAdapter;
     constructor(workspaceRoot: string, db: AstGraphDatabase);
     normalizeRelPath(filePath: string): string;
     discoverAllCandidateFiles(): string[];

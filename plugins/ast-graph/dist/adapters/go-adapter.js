@@ -303,8 +303,8 @@ export class GoCompilerAdapter {
             // Parse Go declarations in `.go` files
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                // 1. Struct definition: `type Foo struct {`
-                const structMatch = line.match(/^\s*type\s+([A-Za-z0-9_]+)\s+struct\s*\{/);
+                // 1. Struct definition: `type Foo struct {` or `type Foo[T any] struct {`
+                const structMatch = line.match(/^\s*type\s+([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s+struct\s*\{/);
                 if (structMatch) {
                     const structName = structMatch[1];
                     const startLine = i + 1;
@@ -372,8 +372,8 @@ export class GoCompilerAdapter {
                     }
                     continue;
                 }
-                // 2. Interface definition: `type Bar interface {`
-                const ifaceMatch = line.match(/^\s*type\s+([A-Za-z0-9_]+)\s+interface\s*\{/);
+                // 2. Interface definition: `type Bar interface {` or `type Bar[T any] interface {`
+                const ifaceMatch = line.match(/^\s*type\s+([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s+interface\s*\{/);
                 if (ifaceMatch) {
                     const ifaceName = ifaceMatch[1];
                     const startLine = i + 1;
@@ -433,8 +433,8 @@ export class GoCompilerAdapter {
                     }
                     continue;
                 }
-                // 3. Receiver method or function: `func (r *Recv) Name(args...) ... {` or `func Name(args...) ... {`
-                const funcMatch = line.match(/^\s*func\s+(?:\(\s*([A-Za-z0-9_]+)?\s*\*?([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s*\)\s+)?([A-Za-z0-9_]+)\s*\(([^)]*)\)/);
+                // 3. Receiver method or function: `func (r *Recv) Name(args...) ... {` or `func Name[T any](args...) ... {`
+                const funcMatch = line.match(/^\s*func\s+(?:\(\s*([A-Za-z0-9_]+)?\s*\*?([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s*\)\s+)?([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s*\(([^)]*)\)/);
                 if (funcMatch) {
                     const recvVar = funcMatch[1];
                     const recvType = funcMatch[2];
@@ -559,15 +559,22 @@ export class GoCompilerAdapter {
                     continue;
                 }
                 const line = rawLine.replace(/\/\/.*$/, '');
-                // 1. Detect Go HTTP route registrations: mux.HandleFunc("/admin/...", handler) or http.HandleFunc(...)
-                const handleMatch = line.match(/\b(?:HandleFunc|Handle)\s*\(\s*"([^"]+)"\s*,\s*([A-Za-z0-9_.]+)/);
+                // 1. Detect Go HTTP route registrations: mux.HandleFunc("/admin/...", handler), r.GET("/...", handler)
+                const handleMatch = line.match(/\b(?:HandleFunc|Handle|GET|POST|PUT|DELETE|PATCH|Get|Post|Put|Delete|Patch)\s*\(\s*"([^"]+)"\s*,\s*([A-Za-z0-9_.]+)/);
                 if (handleMatch) {
+                    const verbMatch = line.match(/\b(GET|POST|PUT|DELETE|PATCH|Get|Post|Put|Delete|Patch)\s*\(/);
                     const rawPattern = handleMatch[1].trim();
                     const handlerExpr = handleMatch[2].trim();
                     const parts = rawPattern.split(/\s+/);
-                    const method = parts.length > 1 ? parts[0].toUpperCase() : 'HTTP';
+                    const method = verbMatch
+                        ? verbMatch[1].toUpperCase()
+                        : parts.length > 1
+                            ? parts[0].toUpperCase()
+                            : 'HTTP';
                     const routePath = parts.length > 1 ? parts[1] : parts[0];
-                    const routeId = `scip-endpoint http ROUTE:${routePath}#`;
+                    const routeId = method !== 'HTTP'
+                        ? `scip-endpoint http ${method}:${routePath}#`
+                        : `scip-endpoint http ROUTE:${routePath}#`;
                     addNode({
                         id: routeId,
                         kind: 'RouteEndpoint',
@@ -580,8 +587,8 @@ export class GoCompilerAdapter {
                         startCol: 1,
                         endLine: lineNo,
                         endCol: 1,
-                        signature: `HandleFunc("${rawPattern}", ${handlerExpr})`,
-                        docstring: `Go ServeMux route ${rawPattern} -> ${handlerExpr}`,
+                        signature: `${method} "${rawPattern}" -> ${handlerExpr}`,
+                        docstring: `Go HTTP route ${rawPattern} -> ${handlerExpr}`,
                         exported: true,
                         complexity: 1,
                         labels: ['RouteEndpoint', 'HttpEndpoint', 'GoServeMuxRoute'],
@@ -600,6 +607,36 @@ export class GoCompilerAdapter {
                     else {
                         addEdge(callable.id, routeId, callable.isTest ? 'TESTS_SYMBOL' : 'HANDLES_ROUTE', callable.filePath, lineNo, { method, path: routePath });
                     }
+                }
+                // 1b. Detect Go os.Getenv("VAR") / os.LookupEnv("VAR") environment bindings
+                const envMatch = line.match(/\bos\.(?:Getenv|LookupEnv)\s*\(\s*"([A-Za-z0-9_]+)"\s*\)/);
+                if (envMatch) {
+                    const envName = envMatch[1];
+                    const envId = `scip-env global env 1.0.0 ${envName}#`;
+                    if (!nodesMap.has(envId)) {
+                        addNode({
+                            id: envId,
+                            kind: 'EnvVar',
+                            name: envName,
+                            qualifiedName: `env::${envName}`,
+                            packageName: callable.pkgName,
+                            filePath: callable.filePath,
+                            language: 'go',
+                            startLine: lineNo,
+                            startCol: 1,
+                            endLine: lineNo,
+                            endCol: 1,
+                            signature: `os.Getenv("${envName}")`,
+                            docstring: `Environment variable ${envName}`,
+                            exported: true,
+                            complexity: 1,
+                            labels: ['EnvVar'],
+                            properties: {},
+                        });
+                    }
+                    addEdge(callable.id, envId, 'CONFIGURES_ENV', callable.filePath, lineNo, {
+                        envVar: envName,
+                    });
                 }
                 // 2. Receiver / struct field reads & writes: `r.Field = ...` or `r.Field`
                 if (callable.receiverVar && callable.receiverType) {

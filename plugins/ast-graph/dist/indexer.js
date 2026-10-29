@@ -3,8 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import ts from 'typescript';
+import { ContractCompilerAdapter } from './adapters/contract-adapter.js';
+import { DockerfileCompilerAdapter } from './adapters/dockerfile-adapter.js';
 import { GoCompilerAdapter } from './adapters/go-adapter.js';
+import { PolyglotCompilerAdapter } from './adapters/polyglot-adapter.js';
 import { PythonCompilerAdapter } from './adapters/python-adapter.js';
+import { RustCompilerAdapter } from './adapters/rust-adapter.js';
 import { SqlCompilerAdapter } from './adapters/sql-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
 import { TypeScriptCompilerAdapter } from './adapters/ts-adapter.js';
@@ -19,6 +23,10 @@ export class AstGraphIndexer {
     goAdapter;
     sqlAdapter;
     webAdapter;
+    dockerAdapter;
+    contractAdapter;
+    rustAdapter;
+    polyglotAdapter;
     constructor(workspaceRoot, db) {
         this.workspaceRoot = canonicalizeWorkspaceRoot(workspaceRoot);
         this.db = db;
@@ -29,6 +37,10 @@ export class AstGraphIndexer {
         this.goAdapter = new GoCompilerAdapter();
         this.sqlAdapter = new SqlCompilerAdapter();
         this.webAdapter = new WebCompilerAdapter();
+        this.dockerAdapter = new DockerfileCompilerAdapter();
+        this.contractAdapter = new ContractCompilerAdapter();
+        this.rustAdapter = new RustCompilerAdapter();
+        this.polyglotAdapter = new PolyglotCompilerAdapter();
     }
     normalizeRelPath(filePath) {
         const abs = path.isAbsolute(filePath)
@@ -43,7 +55,22 @@ export class AstGraphIndexer {
         const goFiles = this.goAdapter.discoverGoFiles(this.workspaceRoot);
         const sqlFiles = this.sqlAdapter.discoverSqlFiles(this.workspaceRoot);
         const webFiles = this.webAdapter.discoverWebFiles(this.workspaceRoot);
-        return [...tsFiles, ...tfFiles, ...pyFiles, ...goFiles, ...sqlFiles, ...webFiles];
+        const dockerFiles = this.dockerAdapter.discoverDockerfiles(this.workspaceRoot);
+        const contractFiles = this.contractAdapter.discoverContractFiles(this.workspaceRoot);
+        const rustFiles = this.rustAdapter.discoverRustFiles(this.workspaceRoot);
+        const polyglotFiles = this.polyglotAdapter.discoverPolyglotFiles(this.workspaceRoot);
+        return [
+            ...tsFiles,
+            ...tfFiles,
+            ...pyFiles,
+            ...goFiles,
+            ...sqlFiles,
+            ...webFiles,
+            ...dockerFiles,
+            ...contractFiles,
+            ...rustFiles,
+            ...polyglotFiles,
+        ];
     }
     /**
      * Fast (<3ms) check comparing filesystem mtimeMs and SHA-256 against tracked files in SQLite.
@@ -223,6 +250,22 @@ export class AstGraphIndexer {
                 if (webBatch.files.length > 0 || webBatch.nodes.length > 0) {
                     this.db.applyBatch(webBatch, true);
                 }
+                const dockerBatch = this.dockerAdapter.extract(this.workspaceRoot);
+                if (dockerBatch.files.length > 0 || dockerBatch.nodes.length > 0) {
+                    this.db.applyBatch(dockerBatch, true);
+                }
+                const contractBatch = this.contractAdapter.extract(this.workspaceRoot);
+                if (contractBatch.files.length > 0 || contractBatch.nodes.length > 0) {
+                    this.db.applyBatch(contractBatch, true);
+                }
+                const rustBatch = this.rustAdapter.extract(this.workspaceRoot);
+                if (rustBatch.files.length > 0 || rustBatch.nodes.length > 0) {
+                    this.db.applyBatch(rustBatch, true);
+                }
+                const polyglotBatch = this.polyglotAdapter.extract(this.workspaceRoot);
+                if (polyglotBatch.files.length > 0 || polyglotBatch.nodes.length > 0) {
+                    this.db.applyBatch(polyglotBatch, true);
+                }
                 if (options.exportSnapshots !== false) {
                     this.db.exportGraph(path.dirname(this.db.dbPath));
                 }
@@ -232,7 +275,11 @@ export class AstGraphIndexer {
                     pyBatch.files.length +
                     goBatch.files.length +
                     sqlBatch.files.length +
-                    webBatch.files.length;
+                    webBatch.files.length +
+                    dockerBatch.files.length +
+                    contractBatch.files.length +
+                    rustBatch.files.length +
+                    polyglotBatch.files.length;
                 this.db.recordSyncRun({
                     durationMs,
                     mode: 'full',
@@ -259,6 +306,10 @@ export class AstGraphIndexer {
             const goTargets = [];
             const sqlTargets = [];
             const webTargets = [];
+            const dockerTargets = [];
+            const contractTargets = [];
+            const rustTargets = [];
+            const polyglotTargets = [];
             let deletedCount = 0;
             for (const relPath of rawTargets) {
                 const absPath = path.join(this.workspaceRoot, relPath);
@@ -296,6 +347,18 @@ export class AstGraphIndexer {
                 }
                 else if (this.webAdapter.supportsFile(relPath)) {
                     webTargets.push(relPath);
+                }
+                else if (this.dockerAdapter.supportsFile(relPath)) {
+                    dockerTargets.push(absPath);
+                }
+                else if (this.contractAdapter.supportsFile(relPath)) {
+                    contractTargets.push(absPath);
+                }
+                else if (this.rustAdapter.supportsFile(relPath)) {
+                    rustTargets.push(absPath);
+                }
+                else if (this.polyglotAdapter.supportsFile(relPath)) {
+                    polyglotTargets.push(absPath);
                 }
             }
             let filesUpdated = 0;
@@ -336,6 +399,26 @@ export class AstGraphIndexer {
                 const webBatch = this.webAdapter.extract(this.workspaceRoot, webTargets);
                 this.db.applyBatch(webBatch, true);
                 filesUpdated += webBatch.files.length;
+            }
+            if (dockerTargets.length > 0) {
+                const dockerBatch = this.dockerAdapter.extract(this.workspaceRoot, dockerTargets);
+                this.db.applyBatch(dockerBatch, true);
+                filesUpdated += dockerBatch.files.length;
+            }
+            if (contractTargets.length > 0) {
+                const contractBatch = this.contractAdapter.extract(this.workspaceRoot, contractTargets);
+                this.db.applyBatch(contractBatch, true);
+                filesUpdated += contractBatch.files.length;
+            }
+            if (rustTargets.length > 0) {
+                const rustBatch = this.rustAdapter.extract(this.workspaceRoot, rustTargets);
+                this.db.applyBatch(rustBatch, true);
+                filesUpdated += rustBatch.files.length;
+            }
+            if (polyglotTargets.length > 0) {
+                const polyglotBatch = this.polyglotAdapter.extract(this.workspaceRoot, polyglotTargets);
+                this.db.applyBatch(polyglotBatch, true);
+                filesUpdated += polyglotBatch.files.length;
             }
             if (options.exportSnapshots) {
                 this.db.exportGraph(path.dirname(this.db.dbPath));

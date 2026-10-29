@@ -664,7 +664,9 @@ export class AstGraphDatabase {
     const normalizedPath = this.normalizeFilePathQuery(trimmed);
     if (
       normalizedPath.includes('/') ||
-      /\.(ts|tsx|mjs|js|jsx|tf|py|go|templ|sql|html)$/.test(normalizedPath)
+      /(?:^|\/)[Dd]ockerfile(?:\.[A-Za-z0-9_.-]+)?$|\.(ts|tsx|mjs|js|jsx|tf|hcl|tfvars|py|go|templ|sql|sqlx|html|proto|graphql|gql|rs|java|kt|kts|cs|rb|ex|exs|php|c|cc|cpp|cxx|h|hh|hpp|hxx|swift|zig|wat|wit)$/.test(
+        normalizedPath,
+      )
     ) {
       const byFile = this.db
         .prepare(
@@ -793,6 +795,13 @@ export class AstGraphDatabase {
       documentsection: 'DocumentSection',
       section: 'DocumentSection',
       heading: 'DocumentSection',
+      env: 'EnvVar',
+      envvar: 'EnvVar',
+      service: 'ServiceInstance',
+      serviceinstance: 'ServiceInstance',
+      stage: 'ServiceInstance',
+      namespace: 'Namespace',
+      module: 'Namespace',
     };
     return aliases[cleaned] ?? raw.trim();
   }
@@ -1706,13 +1715,19 @@ export class AstGraphDatabase {
     if (testFilePaths.length === 0) {
       const pyRow = this.db.prepare("SELECT 1 FROM files WHERE language = 'python' LIMIT 1").get();
       const goRow = this.db.prepare("SELECT 1 FROM files WHERE language = 'go' LIMIT 1").get();
+      const rsRow = this.db.prepare("SELECT 1 FROM files WHERE language = 'rust' LIMIT 1").get();
       const tsRow = this.db.prepare("SELECT 1 FROM files WHERE language = 'typescript' LIMIT 1").get();
       if (goRow && !tsRow) return 'go test ./...';
       if (pyRow && !tsRow) return 'uv run pytest';
+      if (rsRow && !tsRow) return 'cargo test';
       return 'npx vitest run';
     }
     const hasPy = testFilePaths.some((f) => f.endsWith('.py'));
     const hasGo = testFilePaths.some((f) => f.endsWith('.go'));
+    const hasRs = testFilePaths.some((f) => f.endsWith('.rs'));
+    const hasRb = testFilePaths.some((f) => f.endsWith('.rb'));
+    const hasEx = testFilePaths.some((f) => f.endsWith('.exs') || f.endsWith('.ex'));
+    const hasZig = testFilePaths.some((f) => f.endsWith('.zig'));
     if (hasGo) {
       const pkgs = [...new Set(testFilePaths.filter((f) => f.endsWith('.go')).map((f) => {
         const dir = path.dirname(f);
@@ -1724,6 +1739,19 @@ export class AstGraphDatabase {
     }
     if (hasPy) {
       return `uv run pytest ${testFilePaths.filter((f) => f.endsWith('.py')).join(' ')}`;
+    }
+    if (hasRs) {
+      const rsTests = testCaseNames.slice(0, 5);
+      return rsTests.length > 0 ? `cargo test ${rsTests.join(' ')}` : 'cargo test';
+    }
+    if (hasRb) {
+      return `bundle exec rspec ${testFilePaths.filter((f) => f.endsWith('.rb')).join(' ')}`;
+    }
+    if (hasEx) {
+      return `mix test ${testFilePaths.filter((f) => f.endsWith('.exs') || f.endsWith('.ex')).join(' ')}`;
+    }
+    if (hasZig) {
+      return `zig test ${testFilePaths.filter((f) => f.endsWith('.zig')).join(' ')}`;
     }
     return `npx vitest run ${testFilePaths.join(' ')}`;
   }

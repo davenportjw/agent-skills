@@ -19,11 +19,11 @@ Every codebase and prompt is different, but typical results look like:
 
 ## Language Support & Limitations
 
-- Full AST, call graph, property reads/writes, & test mapping: TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`), Python (`.py`, requires `python3`), and Go/Templ (`.go`, `.templ`).
-- Cross-layer route, schema, & infra lineage: connects `fetch()` / HTMX calls to Fastify, FastAPI, Flask, and Go `HandleFunc` routes, Zod/Pydantic schemas, SQL `CREATE TABLE` definitions (`.sql`), and Terraform resources (`.tf`). Custom router wrappers or dynamic URLs won't auto-link.
+- Full AST, call graph, property reads/writes, & test mapping: TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`), Python (`.py`, requires `python3`), Go/Templ (`.go`, `.templ`), and Rust (`.rs`).
+- Polyglot structural & cross-layer indexing: Java (`.java`), Kotlin (`.kt`, `.kts`), C# (`.cs`), Ruby (`.rb`), Elixir (`.ex`, `.exs`), PHP (`.php`), C/C++ (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`), Swift (`.swift`), Zig (`.zig`), and WebAssembly/WIT (`.wat`, `.wit`).
+- API contracts, SQL DDL, & infrastructure lineage: Protobuf (`.proto`), GraphQL (`.graphql`, `.gql`), SQL DDL (`.sql`, `.sqlx` — tables, columns, FKs, views, indexes), Terraform/HCL (`.tf`, `.hcl`, `.tfvars`), and Dockerfile (`Dockerfile`, `Containerfile`). Connects HTTP/RPC routes, schemas, SQL tables, container stages, and environment variables (`scip-env global env 1.0.0 <NAME>#`) across languages.
 - Web & stylesheet structure: HTML, Jinja2, Vue, Svelte, Astro (delegates `<script>` blocks to the TS parser), and CSS.
 - Section outlines only (`ast_outline`): Markdown, YAML, JSON, and TOML.
-- Not supported today: Rust, Java, C/C++, C#, Ruby, PHP, Kotlin, Swift (agents fall back to `grep`).
 
 See [`plugins/ast-graph/README.md`](plugins/ast-graph/README.md) for the full support matrix and CLI usage.
 

@@ -21,7 +21,10 @@ export type NodeKind =
   | 'StylesheetSection'
   | 'CssAtRule'
   | 'TemplateLandmark'
-  | 'DocumentSection';
+  | 'DocumentSection'
+  | 'Namespace'
+  | 'EnvVar'
+  | 'ServiceInstance';
 
 export type EdgeKind =
   | 'CONTAINS'
@@ -74,7 +77,21 @@ export interface GraphFileRecord {
     | 'html'
     | 'css'
     | 'markdown'
-    | 'config';
+    | 'config'
+    | 'dockerfile'
+    | 'protobuf'
+    | 'graphql'
+    | 'rust'
+    | 'java'
+    | 'kotlin'
+    | 'csharp'
+    | 'ruby'
+    | 'elixir'
+    | 'php'
+    | 'cpp'
+    | 'swift'
+    | 'zig'
+    | 'wasm';
   sha256: string;
   mtimeMs: number;
   sizeBytes: number;

@@ -448,6 +448,37 @@ def analyze_callable_body(fn_node, fn_id, file_path, current_cls, is_test_case, 
                                 "line": line_no,
                             })
 
+                # os.getenv("VAR") or os.environ.get("VAR")
+                if callee_name in ("getenv", "get") and sub.args:
+                    is_env_call = False
+                    if callee_name == "getenv" and isinstance(sub.func, ast.Attribute) and isinstance(sub.func.value, ast.Name) and sub.func.value.id == "os":
+                        is_env_call = True
+                    elif callee_name == "get" and isinstance(sub.func, ast.Attribute) and isinstance(sub.func.value, ast.Attribute) and sub.func.value.attr == "environ":
+                        is_env_call = True
+                    if is_env_call and isinstance(sub.args[0], ast.Constant) and isinstance(sub.args[0].value, str):
+                        env_name = sub.args[0].value
+                        env_id = f"scip-env global env 1.0.0 {env_name}#"
+                        all_nodes.append({
+                            "id": env_id,
+                            "filePath": file_path,
+                            "kind": "EnvVar",
+                            "name": env_name,
+                            "qualifiedName": f"env::{env_name}",
+                            "startLine": line_no,
+                            "endLine": line_no,
+                            "signature": f"os.getenv('{env_name}')",
+                            "docstring": f"Environment variable {env_name}",
+                            "complexity": 1,
+                            "labels": ["EnvVar", "PythonEnvVar"],
+                        })
+                        all_edges.append({
+                            "filePath": file_path,
+                            "srcId": fn_id,
+                            "dstId": env_id,
+                            "kind": "CONFIGURES_ENV",
+                            "line": line_no,
+                        })
+
                 # FastAPI TestClient / httpx calls inside tests: client.get('/api/...'), client.post('/api/...')
                 if callee_name in ("get", "post", "put", "delete", "patch") and sub.args:
                     first_arg = sub.args[0]

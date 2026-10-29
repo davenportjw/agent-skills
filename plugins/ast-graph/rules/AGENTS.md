@@ -1,6 +1,6 @@
 ---
 trigger: always_on
-description: Multi-Repo AST & Cross-Layer Lineage GraphDB Sidecar rules for TypeScript/JS, Python, Go/Templ, Terraform, and SQL repositories.
+description: Multi-Repo AST & Cross-Layer Lineage GraphDB Sidecar rules for TypeScript/JS, Python, Go/Templ, Rust, Terraform/HCL, SQL, Dockerfile, Protobuf, GraphQL, Java, Kotlin, C#, Ruby, Elixir, PHP, C/C++, Swift, Zig, and WASM/WIT repositories.
 ---
 
 # AST GraphDB Traceability Rules (`ast-graph`)

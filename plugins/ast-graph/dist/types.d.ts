@@ -1,5 +1,5 @@
 export type ScipSymbolUri = string;
-export type NodeKind = 'WorkspacePackage' | 'File' | 'Class' | 'Interface' | 'Function' | 'Method' | 'Property' | 'TypeAlias' | 'Enum' | 'Variable' | 'ZodSchema' | 'RouteEndpoint' | 'TestSuite' | 'TestCase' | 'TerraformResource' | 'TerraformVariable' | 'TerraformOutput' | 'StylesheetSection' | 'CssAtRule' | 'TemplateLandmark' | 'DocumentSection';
+export type NodeKind = 'WorkspacePackage' | 'File' | 'Class' | 'Interface' | 'Function' | 'Method' | 'Property' | 'TypeAlias' | 'Enum' | 'Variable' | 'ZodSchema' | 'RouteEndpoint' | 'TestSuite' | 'TestCase' | 'TerraformResource' | 'TerraformVariable' | 'TerraformOutput' | 'StylesheetSection' | 'CssAtRule' | 'TemplateLandmark' | 'DocumentSection' | 'Namespace' | 'EnvVar' | 'ServiceInstance';
 export type EdgeKind = 'CONTAINS' | 'IMPORTS' | 'EXPORTS' | 'CALLS' | 'REFERENCES' | 'EXTENDS' | 'IMPLEMENTS' | 'RETURNS_TYPE' | 'HAS_PARAMETER_TYPE' | 'TESTS_SYMBOL' | 'TESTS_FILE' | 'VALIDATES_SCHEMA' | 'EMITS_SCHEMA' | 'HANDLES_ROUTE' | 'CONNECTS_ENDPOINT' | 'CALLS_ROUTE' | 'PROVISIONS_SERVICE' | 'REFERENCES_TF_RESOURCE' | 'CONFIGURES_ENV' | 'READS_PROPERTY' | 'WRITES_PROPERTY';
 export interface ProjectAssessmentManifest {
     schemaVersion: 1;
@@ -17,7 +17,7 @@ export interface ProjectAssessmentManifest {
 export interface GraphFileRecord {
     filePath: string;
     packageName: string;
-    language: 'typescript' | 'javascript' | 'terraform' | 'python' | 'go' | 'templ' | 'sql' | 'html' | 'css' | 'markdown' | 'config';
+    language: 'typescript' | 'javascript' | 'terraform' | 'python' | 'go' | 'templ' | 'sql' | 'html' | 'css' | 'markdown' | 'config' | 'dockerfile' | 'protobuf' | 'graphql' | 'rust' | 'java' | 'kotlin' | 'csharp' | 'ruby' | 'elixir' | 'php' | 'cpp' | 'swift' | 'zig' | 'wasm';
     sha256: string;
     mtimeMs: number;
     sizeBytes: number;

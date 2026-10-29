@@ -60,13 +60,23 @@ export function findEnclosingRepoRoot(targetPath: string): string | null {
     dir = parent;
   }
 
-  // Second pass for non-git workspaces (e.g. temp test directories with package.json / pyproject.toml / go.mod)
+  // Second pass for non-git workspaces (e.g. temp test directories with package.json / pyproject.toml / go.mod / Cargo.toml)
   dir = current;
   while (true) {
     if (
       fs.existsSync(path.join(dir, 'package.json')) ||
       fs.existsSync(path.join(dir, 'pyproject.toml')) ||
-      fs.existsSync(path.join(dir, 'go.mod'))
+      fs.existsSync(path.join(dir, 'go.mod')) ||
+      fs.existsSync(path.join(dir, 'Cargo.toml')) ||
+      fs.existsSync(path.join(dir, 'pom.xml')) ||
+      fs.existsSync(path.join(dir, 'build.gradle')) ||
+      fs.existsSync(path.join(dir, 'build.gradle.kts')) ||
+      fs.existsSync(path.join(dir, 'Gemfile')) ||
+      fs.existsSync(path.join(dir, 'mix.exs')) ||
+      fs.existsSync(path.join(dir, 'composer.json')) ||
+      fs.existsSync(path.join(dir, 'CMakeLists.txt')) ||
+      fs.existsSync(path.join(dir, 'Package.swift')) ||
+      fs.existsSync(path.join(dir, 'build.zig'))
     ) {
       return canonicalizeWorkspaceRoot(dir);
     }
@@ -182,10 +192,38 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
     sql: 0,
     html: 0,
     css: 0,
+    dockerfile: 0,
+    protobuf: 0,
+    graphql: 0,
+    rust: 0,
+    java: 0,
+    kotlin: 0,
+    csharp: 0,
+    ruby: 0,
+    elixir: 0,
+    php: 0,
+    cpp: 0,
+    swift: 0,
+    zig: 0,
+    wasm: 0,
   };
   const frameworksSet = new Set<string>();
 
-  for (const rootManifest of ['package.json', 'pyproject.toml', 'go.mod']) {
+  for (const rootManifest of [
+    'package.json',
+    'pyproject.toml',
+    'go.mod',
+    'Cargo.toml',
+    'pom.xml',
+    'build.gradle',
+    'build.gradle.kts',
+    'Gemfile',
+    'mix.exs',
+    'composer.json',
+    'CMakeLists.txt',
+    'Package.swift',
+    'build.zig',
+  ]) {
     if (fs.existsSync(path.join(canonicalRoot, rootManifest))) {
       manifests.push(rootManifest);
     }
@@ -265,7 +303,7 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
         } else if (entry.name.endsWith('.templ')) {
           fileCounts.templ = (fileCounts.templ ?? 0) + 1;
           frameworksSet.add('Templ');
-        } else if (entry.name.endsWith('.tf')) {
+        } else if (entry.name.endsWith('.tf') || entry.name.endsWith('.hcl') || entry.name.endsWith('.tfvars')) {
           fileCounts.terraform = (fileCounts.terraform ?? 0) + 1;
           if (!manifests.includes(path.dirname(rel) + '/*.tf')) {
             manifests.push(path.dirname(rel) + '/*.tf');
@@ -276,6 +314,49 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
           if (!manifests.includes(path.dirname(rel) + '/*.sql')) {
             manifests.push(path.dirname(rel) + '/*.sql');
           }
+        } else if (
+          entry.name === 'Dockerfile' ||
+          entry.name === 'Containerfile' ||
+          entry.name.startsWith('Dockerfile.') ||
+          entry.name.endsWith('.dockerfile')
+        ) {
+          fileCounts.dockerfile = (fileCounts.dockerfile ?? 0) + 1;
+        } else if (entry.name.endsWith('.proto')) {
+          fileCounts.protobuf = (fileCounts.protobuf ?? 0) + 1;
+          frameworksSet.add('Protobuf/gRPC');
+        } else if (entry.name.endsWith('.graphql') || entry.name.endsWith('.gql')) {
+          fileCounts.graphql = (fileCounts.graphql ?? 0) + 1;
+          frameworksSet.add('GraphQL');
+        } else if (entry.name.endsWith('.rs')) {
+          fileCounts.rust = (fileCounts.rust ?? 0) + 1;
+        } else if (entry.name.endsWith('.java')) {
+          fileCounts.java = (fileCounts.java ?? 0) + 1;
+        } else if (entry.name.endsWith('.kt') || entry.name.endsWith('.kts')) {
+          fileCounts.kotlin = (fileCounts.kotlin ?? 0) + 1;
+        } else if (entry.name.endsWith('.cs')) {
+          fileCounts.csharp = (fileCounts.csharp ?? 0) + 1;
+        } else if (entry.name.endsWith('.rb')) {
+          fileCounts.ruby = (fileCounts.ruby ?? 0) + 1;
+        } else if (entry.name.endsWith('.ex') || entry.name.endsWith('.exs')) {
+          fileCounts.elixir = (fileCounts.elixir ?? 0) + 1;
+        } else if (entry.name.endsWith('.php')) {
+          fileCounts.php = (fileCounts.php ?? 0) + 1;
+        } else if (
+          entry.name.endsWith('.c') ||
+          entry.name.endsWith('.cc') ||
+          entry.name.endsWith('.cpp') ||
+          entry.name.endsWith('.cxx') ||
+          entry.name.endsWith('.h') ||
+          entry.name.endsWith('.hpp') ||
+          entry.name.endsWith('.hxx')
+        ) {
+          fileCounts.cpp = (fileCounts.cpp ?? 0) + 1;
+        } else if (entry.name.endsWith('.swift')) {
+          fileCounts.swift = (fileCounts.swift ?? 0) + 1;
+        } else if (entry.name.endsWith('.zig')) {
+          fileCounts.zig = (fileCounts.zig ?? 0) + 1;
+        } else if (entry.name.endsWith('.wat') || entry.name.endsWith('.wit') || entry.name.endsWith('.wasm')) {
+          fileCounts.wasm = (fileCounts.wasm ?? 0) + 1;
         } else if (
           entry.name.endsWith('.html') ||
           entry.name.endsWith('.htm') ||
@@ -325,12 +406,45 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
   if ((fileCounts.html ?? 0) > 0 || (fileCounts.css ?? 0) > 0) {
     activeAdapters.push('web-composite');
   }
+  if ((fileCounts.dockerfile ?? 0) > 0) {
+    activeAdapters.push('scip-dockerfile');
+  }
+  if ((fileCounts.protobuf ?? 0) > 0 || (fileCounts.graphql ?? 0) > 0) {
+    activeAdapters.push('scip-contracts');
+  }
+  if ((fileCounts.rust ?? 0) > 0) {
+    activeAdapters.push('scip-rust');
+  }
+  if (
+    (fileCounts.java ?? 0) > 0 ||
+    (fileCounts.kotlin ?? 0) > 0 ||
+    (fileCounts.csharp ?? 0) > 0 ||
+    (fileCounts.ruby ?? 0) > 0 ||
+    (fileCounts.elixir ?? 0) > 0 ||
+    (fileCounts.php ?? 0) > 0 ||
+    (fileCounts.cpp ?? 0) > 0 ||
+    (fileCounts.swift ?? 0) > 0 ||
+    (fileCounts.zig ?? 0) > 0 ||
+    (fileCounts.wasm ?? 0) > 0
+  ) {
+    activeAdapters.push('scip-polyglot');
+  }
 
   let testRunner = 'npx vitest run';
   if ((fileCounts.go ?? 0) > 0 && (fileCounts.go ?? 0) >= (fileCounts.python ?? 0)) {
     testRunner = 'go test ./...';
   } else if (fs.existsSync(pyprojectPath) || ((fileCounts.python ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0)) {
     testRunner = 'uv run pytest';
+  } else if ((fileCounts.rust ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0) {
+    testRunner = 'cargo test';
+  } else if ((fileCounts.zig ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0) {
+    testRunner = 'zig build test';
+  } else if ((fileCounts.elixir ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0) {
+    testRunner = 'mix test';
+  } else if ((fileCounts.ruby ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0) {
+    testRunner = 'bundle exec rspec';
+  } else if ((fileCounts.swift ?? 0) > 0 && (fileCounts.typescript ?? 0) === 0) {
+    testRunner = 'swift test';
   }
 
   const manifest: ProjectAssessmentManifest = {
