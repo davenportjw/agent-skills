@@ -40,7 +40,7 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
 
 ## 3. MCP Tools (`ast-graph`)
 
-All MCP tools accept an optional `workspace` parameter (repository path or repository name such as `"warehouse"`, `"electric-sheep"`, `"smartrouter"`, `"the-davenporter"`):
+All MCP tools accept an optional `workspace` parameter (repository path or registered repository name):
 
 - `ast_assess`: Inspect workspace languages, frameworks, test runners, and verify `.ast-graph/manifest.json` + `.git/info/exclude`.
 - `ast_symbol`: Resolve symbol definitions, signatures, callers, callees, and covering tests (supports batch `queries: [...]`).

@@ -42,7 +42,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Skills:
-    - AST GraphDB Traceability: skills/ast-graph-traceability.md
+    - AST GraphDB Traceability (deprecated): skills/ast-graph-traceability.md
     - Apple Container: skills/apple_container.md
     - AST GraphDB Plugin: skills/ast_graph.md
     - GCP Auth: skills/gcp_auth.md

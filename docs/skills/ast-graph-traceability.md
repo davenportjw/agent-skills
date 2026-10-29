@@ -1,15 +1,7 @@
-# AST GraphDB Traceability (`ast-graph-traceability`)
+# AST GraphDB Traceability (`ast-graph-traceability`) — deprecated
 
-The **AST GraphDB Traceability** plugin (`plugins/ast-graph-traceability`) and skill (`.skills/ast-graph-traceability`) provide a multi-compiler **AST & Cross-Layer Lineage GraphDB Sidecar** backed by a local SQLite Labeled Property Graph (`.ast-graph/ast.db` in WAL mode with `FTS5` BM25 search and CSR B-Tree adjacency indexes) and deterministic **Sourcegraph SCIP Symbol URIs**.
+The `plugins/ast-graph-traceability` fork and its standalone skill copies (`.skills/ast-graph-traceability`, `.agents/skills/ast-graph-traceability`) have been **retired**. They diverged from the canonical implementation, with an incompatible DB schema, missing CLI commands and stale output markers.
 
-## Features
+The `ast-graph-traceability` **skill name** lives on inside the canonical plugin at `plugins/ast-graph/skills/ast-graph-traceability/SKILL.md`.
 
-- **11 Zero-Overhead MCP Tools (`warehouse-ast-graph`)**: `ast_symbol`, `ast_refs`, `ast_outline`, `ast_search`, `ast_blast_radius`, `ast_tests_for`, `ast_lineage`, `ast_shortest_path`, `ast_analyze`, `ast_benchmark`, and `ast_sync`.
-- **Automatic `<50ms` Incremental Hooks (`hooks.json`)**: Keeps `.ast-graph/ast.db` synchronized on `SessionStart` and after every `PostToolUse` file edit (`write_file`, `edit_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content`).
-- **Multi-Compiler SCIP Adapters**: Supports TypeScript/JavaScript (`ts.Program`), Zod schemas, Fastify HTTP/WebSocket routes, Vitest suites, Terraform HCL (`*.tf`), and Python (`ast`).
-
-## Installation
-
-```bash
-cp -R plugins/ast-graph-traceability ~/.gemini/config/plugins/ast-graph-traceability
-```
+See **[AST GraphDB Plugin (`ast-graph`)](ast_graph.md)** for installation, tools, the output contract, schema versioning and workspace resolution.

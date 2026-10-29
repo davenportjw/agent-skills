@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Curated collection of global skills, plugins, and AST GraphDB sidecars for agentic AI coding assistants.",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "plugins": [
     {
-      "name": "ast-graph-traceability",
-      "source": "./plugins/ast-graph-traceability",
-      "description": "Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server, and targeted test selection workflow (SCIP + SQLite LPG).",
-      "version": "0.1.0"
+      "name": "ast-graph",
+      "source": "./plugins/ast-graph",
+      "description": "Local AST & cross-layer code graph plugin that cuts agent context token usage by jumping straight to exact line spans, blast radius, and covering tests.",
+      "version": "1.0.0"
     }
   ]
 }
