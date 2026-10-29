@@ -1,47 +1,69 @@
-# AST GraphDB Plugin (`ast-graph`)
+# `ast-graph` Plugin
 
-The **AST GraphDB Plugin** (`plugins/ast-graph`) is a self-contained **Antigravity Plugin** (`plugin.json` + `mcp_config.json` + `hooks.json` + `skills/` + `rules/`) that builds and queries a **per-repository, tamper-proof SQLite Labeled Property Graph (`<repo>/.ast-graph/ast.db`)** with Sourcegraph SCIP symbol URIs across TypeScript/JavaScript, Python, Go/Templ, Terraform HCL, and SQL DDL.
+Coding agents waste time and money scanning thousands of lines of code just to find where a symbol lives, what mutates a field, or what breaks when you change a shared schema.
 
----
+`ast-graph` indexes your repo into a local graph (`.ast-graph/ast.db`) so agents jump straight to exact line spans, upstream callers, and covering tests instead of paging through whole files.
 
-## Architecture & Multi-Repo Isolation
+## Why It Matters
 
-1. **Project Assessor (`ast_assess`)**:
-   - Inspects any repository to detect languages, frameworks (`Fastify`, `FastAPI`, `Flask`, `Go net/http`, `Templ/HTMX`, `Zod`, `Pydantic`, `WebMCP`, `Terraform`, `SQL DDL`), and test runners (`npx vitest run`, `uv run pytest`, `go test`).
-   - Writes `<repo>/.ast-graph/manifest.json` and automatically appends `.ast-graph/` to `<repo>/.git/info/exclude` so git working trees remain 100% clean without modifying committed `.gitignore` files.
-2. **Tamper-Proof Per-Repository Binding**:
-   - Every repository's SQLite database (`<repo>/.ast-graph/ast.db`) stores `canonicalRoot` and `repoId` (`sha256(realpath(repoRoot))`) in its `meta` table.
-   - `verifyRepoBinding()` rejects any attempt to open or write a database from a mismatched repository (`TAMPER_GUARD`).
-3. **Schema Versioning**:
-   - `ast.db` is stamped with `PRAGMA user_version` = `AstGraphDatabase.SCHEMA_VERSION`.
-   - Older or legacy-fork layouts are migrated by dropping the derived index tables, which triggers an automatic full re-sync. The repo binding is kept.
-   - A database written by a newer build is refused with `SCHEMA_TOO_NEW`.
-   - Tests: `test/schema-migration.test.ts`.
-4. **Workspace Resolution (MCP)**:
-   - When `workspace` is omitted, the server resolves the repo in this order: an absolute path in the arguments, then MCP client roots (`roots/list`), then the launch dir (unless it is a plugin install dir), then the registered repos.
-   - It never falls back to the plugin directory. If nothing resolves, it returns `NO_WORKSPACE`; an unresolvable `workspace` value returns `UNKNOWN_WORKSPACE`. Both list the known repos.
-   - Tests: `test/workspace-resolution.test.ts`.
+Every codebase and task is different, but in practice we see:
 
----
+- ~70%–90% fewer context tokens: less budget spent on code search and file reading compared to raw `grep` and chunked file reads.
+- 5x–15x fewer lines read per task: agents read surgical `startLine–endLine` ranges instead of 800-line file chunks.
+- ~3.8 KB max tool responses: query outputs are summary-first and capped so tool results never blow up your context window.
+- Faster verification loops: maps edits directly to the specific tests that cover those symbols (`vitest`, `pytest`, `go test`) instead of running the full suite on every turn.
 
-## Multi-Language Compiler Adapters
+## Language Support & Depth
 
-| Adapter | Languages | Extracted Entities & Cross-Layer Edges |
-| :--- | :--- | :--- |
-| **`ts-compiler`** | TypeScript, JavaScript, ESM (`.ts`, `.js`, `.mjs`) | Functions, classes, methods, `READS_PROPERTY` / `WRITES_PROPERTY`, Zod schemas, Fastify routes, `fetch('/api/...')` `CALLS_ROUTE` edges, WebMCP tools, Vitest suites |
-| **`python-ast`** | Python (`.py`) | Classes, functions, async functions, `self.<attr>` reads/writes, Pydantic `BaseModel` & `@dataclass` schemas, FastAPI/Flask routes, MCP tools, Jinja2 templates, embedded SQL table references, `pytest` suites |
-| **`go`** | Go & Templ (`.go`, `.templ`) | Packages, structs + fields + tags, interfaces, receiver methods, field reads/writes, `HandleFunc` routes, `*_test.go` tests, `.templ` components + HTMX `hx-get`/`hx-post`/`hx-delete` `CALLS_ROUTE` edges |
-| **`terraform`** | Terraform HCL (`.tf`) | Recursive `.tf` discovery across `infra/` and `terraform/`, resources, data sources, variables, outputs, `REFERENCES_TF_RESOURCE`, `PROVISIONS_SERVICE` |
-| **`sql-ddl`** | SQL (`.sql`) | `CREATE TABLE` schemas and columns (`scip-sql ddl sql 1.0.0 table:<name>#`) |
-| **`web-composite`** | HTML/Jinja2/Vue/Svelte/Astro & CSS (`.html`, `.jinja2`, `.css`) + Markdown/YAML/JSON/TOML fallback | Composite `<script>` TypeScript AST delegation (preserving 1-based line offsets), `<style>` & `.css` hierarchical `StylesheetSection` / `CssAtRule` spans, DOM/Jinja `TemplateLandmark` spans, `fetch` / `hx-*` `CALLS_ROUTE` edges, WebMCP tools, and fallback `DocumentSection` outlines for `.md`/`.yaml`/`.json`/`.toml` |
+Not every file type gets the same level of analysis. Here is what is supported and to what extent:
 
----
+| Tier | Languages / Files | What Works | Limitations |
+| :--- | :--- | :--- | :--- |
+| Full AST + Call & Test Graph | TypeScript, JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`), Python (`.py`), Go & Templ (`.go`, `.templ`) | Definitions, exact line spans, callers/callees, property reads vs. writes (`ast_refs`), upstream blast radius, and test mapping (`vitest`, `pytest`, `go test`). | Python indexing requires `python3` on `PATH`. Go uses a fast source parser rather than full `go/types` cross-module type resolution. |
+| Cross-Layer Lineage | Zod, Pydantic, Fastify, FastAPI, Flask, Go `HandleFunc`, HTMX (`hx-*`), browser `fetch()`, SQL (`.sql`), Terraform (`.tf`) | Links frontend calls to backend routes, schemas, SQL `CREATE TABLE` definitions, and Terraform resources via `ast_lineage`. | Matches standard framework decorators and static route strings. Custom router wrappers or dynamically built URLs won't auto-link. |
+| Composite Web & Styles | HTML, Jinja2, Vue, Svelte, Astro, CSS | Parses embedded `<script>` blocks via the TS compiler, maps DOM landmarks, and outlines CSS rules/sections. | Template control flow is mapped as structural landmarks, not a full dataflow graph. |
+| Outline Only (On-Demand) | Markdown, YAML, JSON, TOML | `ast_outline` returns heading and top-level key line ranges so agents can read specific sections of large config/doc files. | Not stored in the symbol graph (`ast_search` and `ast_refs` do not query inside these files). |
+| Unsupported | Rust, Java, C/C++, C#, Ruby, PHP, Kotlin, Swift | None today. | Agents must fall back to standard `grep` / `rg` and file reads. |
+
+### Other Practical Limits
+
+- Static analysis only: runtime reflection, dynamic imports, and metaprogramming won't show up in the call graph.
+- Symbols, not string literals: use `ast-graph` for code structure and identifiers. For UI copy, log messages, or raw text searches, standard `grep -rn` is still the right tool.
+- Zero repo pollution: stores the index in `<repo>/.ast-graph/` and adds it to `.git/info/exclude` automatically so `git status` stays clean.
 
 ## Installation
+
+### 1. Build the plugin
 
 ```bash
 cd plugins/ast-graph
 npm install
 npm run build
+```
+
+### 2. Link into your agent harness
+
+Google Antigravity:
+
+```bash
 ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
+```
+
+Claude Code:
+
+```bash
+claude plugin marketplace add davenportjw/agent-skills
+claude plugin install ast-graph@davenportjw-agent-skills
+```
+
+### 3. Optional CLI usage
+
+```bash
+# Index a repository
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js sync --workspace /path/to/repo
+
+# Look up a symbol, its blast radius, or covering tests
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <SymbolName> --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js blast-radius <SymbolOrFile> --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests-for <SymbolOrFile> --workspace /path/to/repo
 ```

@@ -1,52 +1,70 @@
-# 🤖 Agent Skills: Developer-First Agentic Tooling
+# Agent Skills & Plugins
 
-Welcome to the **Agent Skills** repository! This is a curated collection of global skills, scripts, and sidecar configurations designed to supercharge your pair-programming experience with agentic AI coding assistants.
+Reusable plugins and skills for Google Antigravity, Claude Code, and OpenAI Codex.
 
-These skills run **globally** inside your agent's App Data environment, enabling automated repository logging, workspace diagnostics, and developer-first workflows without polluting your codebase or Git history.
+The flagship plugin in this repo is [`ast-graph`](plugins/ast-graph): a local code graph that stops coding agents from burning tokens scanning whole files and repositories by hand.
 
----
+## Why Use `ast-graph`
 
-## 📚 Documentation
+Left on their own, coding agents run broad `grep` searches and read thousands of lines of code in chunks just to find a definition, check who calls it, or figure out which tests to run. That makes sessions slow and expensive.
 
-The full documentation for all skills is available on our [GitHub Pages site](https://davenportjw.github.io/agent-skills/).
+`ast-graph` builds a fast local index (`.ast-graph/ast.db`) for each repository so the agent gets exact line numbers, callers, upstream blast radius, and covering tests in milliseconds.
 
-## 🛠 Available Plugins & Skills
+Every codebase and prompt is different, but typical results look like:
 
-This repository includes the following curated plugins and skills:
+- ~70%–90% reduction in discovery tokens vs. raw `grep` and full-file chunk reading.
+- 5x–15x fewer lines read per task: the agent reads only the exact `startLine–endLine` span it needs.
+- Compact ~3.8 KB tool responses: summary-first outputs keep your context window clean over long sessions.
+- Targeted test runs: runs only the tests linked to the changed code (`vitest`, `pytest`, `go test`) instead of the entire test suite.
 
-* **`ast-graph-traceability`** ([`plugins/ast-graph-traceability`](plugins/ast-graph-traceability) & [`.skills/ast-graph-traceability`](.skills/ast-graph-traceability)): Multi-compiler AST & Cross-Layer Lineage GraphDB sidecar, MCP server (`warehouse-ast-graph`), lifecycle hooks (`hooks.json`), and targeted test selection workflow (SCIP + SQLite LPG).
-* **`apple_container`**: Replaces Docker with Apple's native container CLI for local development, orchestration, and Kubernetes.
-* **`ast-graph`** (`plugins/ast-graph` & `.skills/ast-graph-traceability`): Multi-repo, tamper-proof AST & Cross-Layer Lineage GraphDB plugin (`.ast-graph/ast.db`, SCIP + SQLite LPG) across TypeScript/JS, Python, Go/Templ, Terraform, and SQL.
-* **`gcp_auth`**: Implement and debug Google Cloud Authentication using Identity Platform, Firebase, and Cloud Run IAM.
-* **`llm_tutor`**: A generic tutor skill that reads a curriculum YAML schema, adapts to user personas, and interactively guides learners.
-* **`session-journal`**: Automatically logs, tracks, and summarizes active coding sessions and discussions inside your workspace.
-* **`update_documentation`**: A skill to verify and update project documentation after changes or walkthrough creation.
+## Language Support & Limitations
 
----
+- Full AST, call graph, property reads/writes, & test mapping: TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`), Python (`.py`, requires `python3`), and Go/Templ (`.go`, `.templ`).
+- Cross-layer route, schema, & infra lineage: connects `fetch()` / HTMX calls to Fastify, FastAPI, Flask, and Go `HandleFunc` routes, Zod/Pydantic schemas, SQL `CREATE TABLE` definitions (`.sql`), and Terraform resources (`.tf`). Custom router wrappers or dynamic URLs won't auto-link.
+- Web & stylesheet structure: HTML, Jinja2, Vue, Svelte, Astro (delegates `<script>` blocks to the TS parser), and CSS.
+- Section outlines only (`ast_outline`): Markdown, YAML, JSON, and TOML.
+- Not supported today: Rust, Java, C/C++, C#, Ruby, PHP, Kotlin, Swift (agents fall back to `grep`).
 
-## 🚀 Installation Guide
+See [`plugins/ast-graph/README.md`](plugins/ast-graph/README.md) for the full support matrix and CLI usage.
 
-### Installing the AST GraphDB Plugin (Antigravity)
+## Quick Install
 
-Copy the `ast-graph-traceability` plugin bundle into your global Antigravity plugins directory (`~/.gemini/config/plugins/`):
-
-```bash
-cp -R plugins/ast-graph-traceability ~/.gemini/config/plugins/ast-graph-traceability
-```
-
-### Installing Standalone Skills
-
-To install and load standalone skills into your active coding assistant's global environment, copy the desired directories into your App Data Directory's skills folder (e.g., `<global_agent_directory>/skills/`):
+### `ast-graph` Plugin (Recommended)
 
 ```bash
-# Example: Install the update_documentation skill
-cp -R .skills/update_documentation <global_agent_directory>/skills/update_documentation
+git clone https://github.com/davenportjw/agent-skills.git
+cd agent-skills/plugins/ast-graph
+npm install
+npm run build
+
+# Link into Google Antigravity
+ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
 ```
 
-For more complex skills like `session-journal`, additional setup may be required for sidecar daemons. Please see the [Documentation](https://davenportjw.github.io/agent-skills/) for detailed installation steps per skill.
+For Claude Code:
 
+```bash
+claude plugin marketplace add davenportjw/agent-skills
+claude plugin install ast-graph@davenportjw-agent-skills
+```
 
----
+### Standalone Skills
 
-## 📄 License
-This collection of skills is released under the **Apache-2.0 License**. Feel free to fork, modify, and share them with your teams!
+To install individual skills into your agent's global skills folder:
+
+```bash
+cp -R .skills/<skill_name> ~/.gemini/config/skills/<skill_name>
+```
+
+| Skill / Plugin | Purpose |
+| :--- | :--- |
+| [`ast-graph`](plugins/ast-graph) | Local code & cross-layer dependency graph (`ast_symbol`, `ast_outline`, `ast_refs`, `ast_blast_radius`, `ast_tests_for`, `ast_lineage`). |
+| [`apple_container`](.skills/apple_container) | Replaces Docker with Apple's native container CLI on macOS. |
+| [`gcp_auth`](.skills/gcp_auth) | Google Cloud authentication patterns for Identity Platform, Firebase, and Cloud Run IAM. |
+| [`llm_tutor`](.skills/llm_tutor) | Interactive curriculum-driven technical tutor skill. |
+| [`session-journal`](.skills/session-journal) | Tracks and summarizes active coding sessions locally in `.local/sessions/`. |
+| [`update_documentation`](.skills/update_documentation) | Keeps project docs and tests in sync after code changes. |
+
+## License
+
+Apache-2.0
