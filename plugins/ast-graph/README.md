@@ -1,8 +1,33 @@
-# `ast-graph`
+<div align="center">
+  <img src="https://davenporter.com/static/images/essays/ast-graph-stop-reading-every-file/hero-ast-graph-1456x816.png" alt="An engineer buried in printed code pages beside an engineer using a glowing graph to open one exact drawer." width="100%" />
+
+  <h1><code>ast-graph</code></h1>
+
+  <p>
+    <strong>A local code graph so your coding agent reads less code.</strong><br />
+    The agent asks the graph where to look, gets exact line ranges, callers, and the tests to run, then reads only those lines.
+  </p>
+
+  <p>
+    <a href="https://davenporter.com/writings/ast-graph-stop-reading-every-file"><strong>Read the write-up: Your coding agent is reading too much code →</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://davenporter.com/builds/ast-graph">Builds page</a>
+    &nbsp;·&nbsp;
+    <a href="#installation">Install</a>
+    &nbsp;·&nbsp;
+    <a href="#core-mcp-tools">MCP Tools</a>
+    &nbsp;·&nbsp;
+    <a href="https://davenporter.com">Powered by Davenporter ↗</a>
+  </p>
+</div>
+
+---
 
 Coding agents waste time and money scanning thousands of lines of code just to find where a symbol lives, what mutates a field, or what breaks when you change a shared schema.
 
 `ast-graph` indexes your repo into a local graph (`.ast-graph/ast.db`) so agents jump straight to exact line spans, upstream callers, and covering tests instead of paging through whole files.
+
+I built it while working on [FreightFloor](https://github.com/davenportjw/freightfloor) (161 TypeScript files). One shared Zod schema change. `grep -rn` returned 32.6 MB. `ast_blast_radius` returned 3.7 KB. That covered 72 impacted symbols and the 6 test files to run. The full story and more examples are in the original post on [The Davenporter](https://davenporter.com/writings/ast-graph-stop-reading-every-file).
 
 ## Why It Matters
 
@@ -83,3 +108,8 @@ node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests-for <SymbolOrFile> --w
 - `ast_blast_radius`: Check what breaks upstream before refactoring.
 - `ast_tests_for`: Get the exact test command for the code you just touched.
 - `ast_lineage`: Trace a schema, SQL table, or route across frontend, backend, and Terraform.
+
+## Read More
+
+- Original post: [Your coding agent is reading too much code](https://davenporter.com/writings/ast-graph-stop-reading-every-file)
+- More builds and essays: [davenporter.com](https://davenporter.com)
