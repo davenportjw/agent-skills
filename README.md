@@ -17,6 +17,8 @@ Every codebase and prompt is different, but typical results look like:
 - Compact ~3.8 KB tool responses: summary-first outputs keep your context window clean over long sessions.
 - Targeted test runs: runs only the tests linked to the changed code (`vitest`, `pytest`, `go test`) instead of the entire test suite.
 
+On [FreightFloor](https://github.com/davenportjw/freightfloor) (161 TypeScript files), changing one shared Zod schema: `grep -rn` returned 32.6 MB, `ast_blast_radius` returned 3.7 KB with 72 impacted symbols and the 6 test files to run. Write-up with more examples: [Your coding agent is reading too much code](https://davenporter.com/writings/ast-graph-stop-reading-every-file).
+
 ## Language Support & Limitations
 
 - Full AST, call graph, property reads/writes, & test mapping: TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`), Python (`.py`, requires `python3`), Go/Templ (`.go`, `.templ`), and Rust (`.rs`).
@@ -31,22 +33,23 @@ See [`plugins/ast-graph/README.md`](plugins/ast-graph/README.md) for the full su
 
 ### `ast-graph` Plugin (Recommended)
 
-```bash
-git clone https://github.com/davenportjw/agent-skills.git
-cd agent-skills/plugins/ast-graph
-npm install
-npm run build
-
-# Link into Google Antigravity
-ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
-```
-
 For Claude Code:
 
 ```bash
 claude plugin marketplace add davenportjw/agent-skills
 claude plugin install ast-graph@davenportjw-agent-skills
 ```
+
+For Google Antigravity (`dist/` is committed, so only the runtime dependency is needed):
+
+```bash
+git clone https://github.com/davenportjw/agent-skills.git
+cd agent-skills/plugins/ast-graph
+npm install --omit=dev
+ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
+```
+
+Restart your agent after installing. If you used the old `ast-graph-traceability` plugin, remove it first (`claude plugin uninstall ast-graph-traceability@davenportjw-agent-skills`, or delete `~/.gemini/config/plugins/ast-graph-traceability`).
 
 ### Standalone Skills
 

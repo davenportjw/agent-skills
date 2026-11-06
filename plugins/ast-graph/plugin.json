@@ -2,7 +2,7 @@
   "name": "ast-graph",
   "displayName": "AST GraphDB & Cross-Layer Lineage",
   "version": "1.0.0",
-  "description": "Multi-language, multi-repo SQLite Labeled Property Graph sidecar for TypeScript/JS, Python/FastAPI/Pydantic, Go/Templ, SQL DDL, and Terraform with tamper-proof per-project isolation.",
+  "description": "Local per-repo code graph so coding agents get exact line spans, callers, blast radius, and covering tests instead of reading whole files. TypeScript/JS, Python, Go, Rust, plus structural support for Java, C#, Ruby, PHP, SQL, Terraform, and more.",
   "suggestedPrompts": [
     "Assess this repository and synchronize its AST GraphDB index",
     "Compute the 3-hop upstream blast radius and covering tests for a core symbol",
