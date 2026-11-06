@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -d \"$R/node_modules/typescript\" ] || (cd \"$R\" && npm install --omit=dev --no-audit --no-fund --silent) >/dev/null 2>&1; node --no-warnings \"$R/dist/hook-handler.js\" session-start",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --no-warnings \"${CLAUDE_PLUGIN_ROOT}/dist/hook-handler.js\" post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

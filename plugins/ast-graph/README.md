@@ -33,30 +33,37 @@ Not every file type gets the same level of analysis. Here is what is supported a
 
 ## Installation
 
-### 1. Build the plugin
-
-```bash
-cd plugins/ast-graph
-npm install
-npm run build
-```
-
-### 2. Link into your agent harness
-
-Google Antigravity:
-
-```bash
-ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
-```
-
-Claude Code:
+### Claude Code
 
 ```bash
 claude plugin marketplace add davenportjw/agent-skills
 claude plugin install ast-graph@davenportjw-agent-skills
 ```
 
-### 3. Optional CLI usage
+The MCP server and hooks install the one runtime dependency (`typescript`) into the plugin cache on first start. If you installed the old `ast-graph-traceability` plugin, run `claude plugin uninstall ast-graph-traceability@davenportjw-agent-skills` first.
+
+### Google Antigravity
+
+`dist/` is committed, so you only need the runtime dependency, then link the folder (the MCP config expects this exact path):
+
+```bash
+git clone https://github.com/davenportjw/agent-skills
+cd agent-skills/plugins/ast-graph
+npm install --omit=dev
+ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
+```
+
+Restart Antigravity after linking. If you have the old `~/.gemini/config/plugins/ast-graph-traceability` folder, remove it so the two don't both load.
+
+### Building from source
+
+```bash
+npm install
+npm run build
+npm test
+```
+
+### Optional CLI usage
 
 ```bash
 # Index a repository

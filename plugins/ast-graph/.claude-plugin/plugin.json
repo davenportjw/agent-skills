@@ -1,0 +1,12 @@
+{
+  "name": "ast-graph",
+  "version": "1.0.0",
+  "description": "Local AST & cross-layer code graph plugin that cuts agent context token usage by jumping straight to exact line spans, blast radius, and covering tests.",
+  "author": {
+    "name": "Jason Davenport",
+    "url": "https://github.com/davenportjw"
+  },
+  "repository": "https://github.com/davenportjw/agent-skills",
+  "license": "Apache-2.0",
+  "keywords": ["ast", "sqlite", "graph", "lineage", "mcp", "code-search"]
+}

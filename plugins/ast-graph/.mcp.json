@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ast-graph": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -d \"$R/node_modules/typescript\" ] || (cd \"$R\" && npm install --omit=dev --no-audit --no-fund --silent) >&2; exec node --no-warnings \"$R/dist/mcp.js\""
+      ]
+    }
+  }
+}

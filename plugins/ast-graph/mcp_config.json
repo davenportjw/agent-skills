@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "ast-graph": {
-      "command": "node",
+      "command": "sh",
       "args": [
-        "--no-warnings",
-        "/Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/mcp.js"
+        "-c",
+        "exec node --no-warnings \"$HOME/.gemini/config/plugins/ast-graph/dist/mcp.js\""
       ]
     }
   }

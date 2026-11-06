@@ -4,7 +4,7 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "node --no-warnings /Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/hook-handler.js session-start",
+        "command": "node --no-warnings ./dist/hook-handler.js session-start",
         "timeout": 20
       }
     ],
@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node --no-warnings /Users/jasondavenport/GitHub/agent-skills/plugins/ast-graph/dist/hook-handler.js post-tool-use",
+            "command": "node --no-warnings ./dist/hook-handler.js post-tool-use",
             "timeout": 10
           }
         ]
