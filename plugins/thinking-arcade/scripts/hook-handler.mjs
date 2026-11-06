@@ -805,6 +805,23 @@ export async function notifySidecarDaemon(transition, options = {}) {
   }
 }
 
+/**
+ * True when a PreInvocation starts a new user turn. `invocationNum === 0` alone is not reliable
+ * (it is not always reset per prompt), so a changed `lastUserInput` or a previously idle session
+ * also counts. Prompt starts auto-acknowledge finished conversations so the game resumes.
+ */
+export function isPromptStartEvent(eventArg, transition, prevSession = {}, prevSessionState = 'IDLE') {
+  const evNorm = String(eventArg || '').toLowerCase();
+  if (evNorm !== 'pre-invocation' && evNorm !== 'preinvocation') return false;
+  if (transition.invocationNum === 0) return true;
+  if (prevSessionState === 'IDLE') return true;
+  return (
+    typeof transition.lastUserInput === 'string' &&
+    transition.lastUserInput !== '' &&
+    transition.lastUserInput !== prevSession.lastUserInput
+  );
+}
+
 const isMain =
   process.argv[1] &&
   fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(__filename);
@@ -835,11 +852,7 @@ if (isMain) {
     (transition.sessionId && disk.sessions?.[transition.sessionId]) || {};
   const prevSessionState = prevSession.state || disk.state || 'IDLE';
   const evNorm = eventArg.toLowerCase();
-  const isPromptStart =
-    (evNorm === 'pre-invocation' || evNorm === 'preinvocation') &&
-    (transition.invocationNum !== undefined
-      ? transition.invocationNum === 0
-      : prevSessionState === 'IDLE');
+  const isPromptStart = isPromptStartEvent(eventArg, transition, prevSession, prevSessionState);
   const clientActive = Boolean(
     prevSession.lastClientPollAt &&
       Date.now() - Number(prevSession.lastClientPollAt) < 4000,

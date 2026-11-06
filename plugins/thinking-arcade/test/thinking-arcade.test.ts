@@ -18,6 +18,7 @@ import {
   resolveArcadeFlags,
   setArcadeFlag,
   syncArtifactIfPresent,
+  isPromptStartEvent,
 } from '../scripts/hook-handler.mjs';
 
 describe('thinking-arcade plugin (Model Invaders sidecar)', () => {
@@ -582,5 +583,16 @@ describe('thinking-arcade plugin (Model Invaders sidecar)', () => {
       hookSrv.server.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isPromptStartEvent (auto-resume on new prompt)', () => {
+  it('detects a new turn even when invocationNum is not reset', () => {
+    const prev = { state: 'THINKING', lastUserInput: 'package this' };
+    expect(isPromptStartEvent('pre-invocation', { invocationNum: 7, lastUserInput: 'resume did not happen' }, prev, 'THINKING')).toBe(true);
+    expect(isPromptStartEvent('pre-invocation', { invocationNum: 7, lastUserInput: 'package this' }, prev, 'THINKING')).toBe(false);
+    expect(isPromptStartEvent('pre-invocation', { invocationNum: 0 }, prev, 'THINKING')).toBe(true);
+    expect(isPromptStartEvent('pre-invocation', { invocationNum: 3 }, {}, 'IDLE')).toBe(true);
+    expect(isPromptStartEvent('pre-tool-use', { invocationNum: 0, lastUserInput: 'x' }, {}, 'IDLE')).toBe(false);
   });
 });

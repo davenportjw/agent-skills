@@ -14,7 +14,7 @@
 
 - **One global game window** (`/?scope=global`, the default `window` mode) aggregates every live conversation: it plays while any conversation is working and pauses as soon as one needs you (turn finished, `ask_question`, or a permission prompt).
 - **Needs you** list under the game shows each waiting conversation. In the window, **Open ↗** focuses Antigravity (`POST /api/focus`, override the app with `THINKING_ARCADE_FOCUS_APP`) and copies the prompt; in the Right Auxiliary Pane each row is a `conversation://<id>` link that jumps to that chat.
-- **Keep playing** (`POST /api/ack`) dismisses the current waiting set and resumes play; a new prompt also auto-acknowledges.
+- **Keep playing** (`POST /api/ack`) dismisses the current waiting set and resumes play; a new prompt also auto-acknowledges (on the first `PreInvocation` of the turn, which can lag while Antigravity compacts a long conversation).
 - **Close detection**: the window is tracked over SSE. After you close it the hook does not reopen it; instead the agent prints a `▶ Reopen Model Invaders` link (`GET /open`).
 - **Multi-instance sync**: every server instance (the CLI daemon and the Antigravity-managed pane copy) re-reads the shared state file, so all views stay consistent.
 
