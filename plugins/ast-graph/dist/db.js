@@ -1,7 +1,15 @@
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { DatabaseSync } from 'node:sqlite';
+const origEmitWarning = process.emitWarning.bind(process);
+process.emitWarning = ((warning, ...args) => {
+    const msg = typeof warning === 'string' ? warning : warning?.message ?? '';
+    if (msg.includes('SQLite is an experimental feature'))
+        return;
+    return origEmitWarning(warning, ...args);
+});
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 import { buildFallbackStructuralOutline } from './adapters/web-adapter.js';
 import { canonicalizeWorkspaceRoot, computeRepoId } from './assessor.js';
 const CANONICAL_QUERY_ALIASES = {
@@ -65,7 +73,7 @@ export class AstGraphDatabase {
         }
     }
     /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
-    static SCHEMA_VERSION = 2;
+    static SCHEMA_VERSION = 3;
     /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
     static DERIVED_TABLES = [
         'nodes_fts',
@@ -794,18 +802,6 @@ export class AstGraphDatabase {
                 results.set(mapped.id, mapped);
             }
         }
-        if (results.size === 0) {
-            const topRows = this.db
-                .prepare(`SELECT * FROM nodes
-           WHERE kind IN ('Function', 'Class', 'RouteEndpoint', 'ZodSchema', 'Interface')
-           ORDER BY exported DESC, complexity DESC
-           LIMIT ?`)
-                .all(limit);
-            for (const r of topRows) {
-                const mapped = this.mapNodeRow(r);
-                results.set(mapped.id, mapped);
-            }
-        }
         return [...results.values()].slice(0, limit);
     }
     getFileOutline(filePathQuery, options) {
@@ -852,9 +848,18 @@ export class AstGraphDatabase {
                         const rawContent = fs.readFileSync(path.join(canonicalRoot, diskRelPath), 'utf8');
                         const fallback = buildFallbackStructuralOutline(diskRelPath, rawContent);
                         const filterLower = options?.filter?.trim().toLowerCase();
-                        const filteredSyms = filterLower
-                            ? fallback.symbols.filter((s) => `${s.name} ${s.qualifiedName} ${s.signature}`.toLowerCase().includes(filterLower))
-                            : fallback.symbols;
+                        const kindFilterLower = this.normalizeKindFilter(options?.kind)?.toLowerCase();
+                        const exportedOnly = Boolean(options?.exportedOnly);
+                        const filteredSyms = fallback.symbols.filter((s) => {
+                            if (kindFilterLower && s.kind.toLowerCase() !== kindFilterLower)
+                                return false;
+                            if (exportedOnly && !s.exported)
+                                return false;
+                            if (filterLower && !`${s.name} ${s.qualifiedName} ${s.signature}`.toLowerCase().includes(filterLower)) {
+                                return false;
+                            }
+                            return true;
+                        });
                         const slicedFallback = filteredSyms.slice(0, limit);
                         const latencyMs = performance.now() - t0;
                         this.recordQueryTelemetry('getFileOutline', filePathQuery, latencyMs, slicedFallback.length);
@@ -878,14 +883,26 @@ export class AstGraphDatabase {
             }
             const reqExt = path.extname(normalized).toLowerCase();
             const reqDir = path.dirname(normalized).replace(/^\.$/, '');
+            const reqBase = path.basename(normalized, path.extname(normalized)).toLowerCase();
+            const reqTokens = reqBase.split(/[-_./]+/).filter((t) => t.length >= 2);
             const allTrackedFiles = this.db.prepare('SELECT file_path FROM files ORDER BY file_path ASC').all().map((r) => r.file_path);
             const fallbackFiles = allTrackedFiles
                 .map((fp) => {
                 let score = 0;
-                if (reqExt && fp.toLowerCase().endsWith(reqExt))
-                    score += 10;
+                const fpLower = fp.toLowerCase();
+                const fpBase = path.basename(fpLower, path.extname(fpLower));
+                if (reqBase && fpBase === reqBase)
+                    score += 25;
+                else if (reqBase && (fpBase.includes(reqBase) || reqBase.includes(fpBase)))
+                    score += 14;
+                for (const tok of reqTokens) {
+                    if (fpBase.includes(tok))
+                        score += 6;
+                }
                 if (reqDir && fp.includes(reqDir))
                     score += 8;
+                if (reqExt && fpLower.endsWith(reqExt))
+                    score += 6;
                 return { fp, score };
             })
                 .sort((a, b) => b.score - a.score || a.fp.localeCompare(b.fp))
@@ -923,9 +940,19 @@ export class AstGraphDatabase {
                     const rawContent = fs.readFileSync(path.join(canonicalRoot, matchedFile.file_path), 'utf8');
                     const fallback = buildFallbackStructuralOutline(matchedFile.file_path, rawContent);
                     const filterLowerFallback = options?.filter?.trim().toLowerCase();
-                    const filteredSyms = filterLowerFallback
-                        ? fallback.symbols.filter((s) => `${s.name} ${s.qualifiedName} ${s.signature}`.toLowerCase().includes(filterLowerFallback))
-                        : fallback.symbols;
+                    const kindFilterLowerFallback = this.normalizeKindFilter(options?.kind)?.toLowerCase();
+                    const exportedOnlyFallback = Boolean(options?.exportedOnly);
+                    const filteredSyms = fallback.symbols.filter((s) => {
+                        if (kindFilterLowerFallback && s.kind.toLowerCase() !== kindFilterLowerFallback)
+                            return false;
+                        if (exportedOnlyFallback && !s.exported)
+                            return false;
+                        if (filterLowerFallback &&
+                            !`${s.name} ${s.qualifiedName} ${s.signature}`.toLowerCase().includes(filterLowerFallback)) {
+                            return false;
+                        }
+                        return true;
+                    });
                     const slicedFallback = filteredSyms.slice(0, limit);
                     const latencyMs = performance.now() - t0;
                     this.recordQueryTelemetry('getFileOutline', filePathQuery, latencyMs, slicedFallback.length);
@@ -1031,6 +1058,7 @@ export class AstGraphDatabase {
             const latencyMs = performance.now() - t0;
             this.recordQueryTelemetry('getSymbolNeighborhood', symbolIdOrName, latencyMs, 0);
             return {
+                query: symbolIdOrName,
                 symbol: null,
                 matches: suggestions,
                 callers: [],
@@ -1126,6 +1154,7 @@ export class AstGraphDatabase {
         const latencyMs = performance.now() - t0;
         this.recordQueryTelemetry('getSymbolNeighborhood', symbolIdOrName, latencyMs, incomingRows.length + outgoingRows.length + testRows.length);
         return {
+            query: symbolIdOrName,
             symbol: focal,
             matches: exactMatches,
             callers: this.mapEdgeRows(incomingRows),
@@ -1153,7 +1182,7 @@ export class AstGraphDatabase {
     getSymbolReferences(symbolIdOrName, options) {
         const t0 = performance.now();
         const limit = Math.max(5, Math.min(200, options?.limit ?? 60));
-        const matches = this.resolveTargetSymbols(symbolIdOrName, 12, { exactOnly: true });
+        const matches = this.resolveTargetSymbols(symbolIdOrName, 50, { exactOnly: true });
         if (matches.length === 0) {
             const latencyMs = performance.now() - t0;
             this.recordQueryTelemetry('getSymbolReferences', symbolIdOrName, latencyMs, 0);

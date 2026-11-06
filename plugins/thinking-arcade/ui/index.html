@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Model Invaders — Thinking Arcade Sidecar</title>
+  <script src="/preload.js"></script>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    canvas {
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-2 select-none">
+  <div class="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded-xl p-3.5 shadow-sm space-y-2.5">
+
+    <!-- Top Header & Scoreboard -->
+    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-[var(--secondary)] border border-[var(--border)] flex items-center justify-center font-mono font-bold text-sm">
+          👾
+        </div>
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="font-semibold text-sm tracking-tight text-[var(--foreground)]">MODEL INVADERS</h1>
+            <span id="session-pill" class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5">
+              <span id="session-dot" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              <span id="session-state-text">AGENT THINKING</span>
+            </span>
+            <span id="sse-conn-indicator" class="text-xs font-mono text-[var(--muted-foreground)]">● SYNCED</span>
+          </div>
+          <p id="activity-subtitle" class="text-xs text-[var(--muted-foreground)] font-mono">
+            Ship: CONTEXT GUARDIAN (←/→ or mouse to move · SPACE or click to fire ast_symbol laser)
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+        <div class="px-2 py-1 rounded-md bg-[var(--background)] border border-[var(--border)]">
+          SCORE <strong id="hud-score" class="text-amber-500">0</strong>
+        </div>
+        <div class="px-2 py-1 rounded-md bg-[var(--background)] border border-[var(--border)]">
+          HI <strong id="hud-hiscore" class="text-emerald-500">0</strong>
+        </div>
+        <div class="px-2 py-1 rounded-md bg-[var(--background)] border border-[var(--border)]">
+          WAVE <strong id="hud-wave" class="text-sky-500">1</strong>
+        </div>
+        <div id="hud-lives" class="px-2 py-1 rounded-md bg-[var(--background)] border border-[var(--border)] text-rose-500">
+          ❤️❤️❤️
+        </div>
+        <button id="btn-demo-override" onclick="toggleManualOverride()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs transition" title="Toggle manual simulation mode">
+          ⚡ Sim Thinking
+        </button>
+        <button id="btn-pip" onclick="openFloatingArcade()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--secondary)] text-[var(--foreground)] text-xs transition" title="Pop out into a pinned floating Picture-in-Picture window">
+          📌 Pop-Out PiP
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Space Invaders Viewport (Fixed 260px height so widget fits <465px inside <agent-embed>) -->
+    <div class="relative w-full rounded-lg border border-[var(--border)] overflow-hidden" style="height: 260px; background: #070a12;">
+      <canvas id="invaders-canvas" width="600" height="260" class="w-full block" style="height: 260px;"></canvas>
+
+      <!-- STRICT SESSION GATE OVERLAY: Shown whenever agent is IDLE or WAITING_FOR_APPROVAL -->
+      <div id="gate-overlay" class="hidden absolute inset-0 backdrop-blur-md bg-[#070a12]/90 flex flex-col items-center justify-center p-4 text-center z-20">
+        <div id="gate-pill" class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-mono font-semibold mb-1.5">
+          SESSION IDLE — RESPONSE COMPLETE
+        </div>
+        <h2 id="gate-title" class="text-sm font-semibold text-white mb-1">
+          Model Invaders Auto-Paused by Stop Hook
+        </h2>
+        <p id="gate-desc" class="text-xs text-slate-300 max-w-md leading-relaxed mb-3">
+          This sidecar only runs while the agent is actively thinking or executing tools. High score (<span id="gate-score" class="text-emerald-400 font-mono font-bold">0</span>) is saved.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <button id="btn-keep-playing" onclick="ackAttention()" class="hidden px-3 py-1 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs transition">
+            ▶ Keep playing (Enter)
+          </button>
+          <button onclick="triggerHookState('THINKING', 'PreInvocation', 'Manual Simulator')" class="px-3 py-1 rounded-md bg-amber-500 text-slate-950 font-semibold text-xs transition">
+            ▶ Resume Wave (Sim Thinking)
+          </button>
+          <button onclick="triggerHookState('TOOL_RUNNING', 'PreToolUse', 'ast_symbol')" class="px-3 py-1 rounded-md bg-slate-800 text-slate-200 border border-slate-700 text-xs transition">
+            🔧 Spawn Tool UFO
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Legend + Quick Hook Controls -->
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs font-mono text-[var(--muted-foreground)]">
+      <div class="flex flex-wrap items-center gap-2.5">
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-rose-500 inline-block"></span> HALLUCIN (30)</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-500 inline-block"></span> CTX_DRIFT (20)</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></span> RAW_GREP (10)</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-emerald-400 inline-block"></span> TOOL UFO (100)</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button onclick="triggerHookState('THINKING', 'PreInvocation', 'Agent reasoning')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
+          ▶ Think
+        </button>
+        <button onclick="triggerHookState('TOOL_RUNNING', 'PreToolUse', 'ast_blast_radius')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
+          🔧 Tool
+        </button>
+        <button onclick="triggerHookState('WAITING_FOR_APPROVAL', 'PermissionRequest', 'Awaiting user confirmation')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
+          ⏸ Ask
+        </button>
+        <button onclick="triggerHookState('IDLE', 'Stop', 'Turn complete')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
+          ⏹ Stop
+        </button>
+      </div>
+    </div>
+
+    <!-- Conversations waiting for the user (global scope only); rows link back to Antigravity -->
+    <div id="waiting-panel" class="hidden pt-2 border-t border-[var(--border)]">
+      <div class="flex items-center justify-between mb-1.5">
+        <h2 class="text-sm font-semibold text-[var(--foreground)]">Needs you <span id="waiting-count" class="font-mono text-[var(--muted-foreground)]"></span></h2>
+        <span id="waiting-active" class="text-xs font-mono text-[var(--muted-foreground)]"></span>
+      </div>
+      <p id="waiting-empty" class="text-sm text-[var(--muted-foreground)]">No conversations are waiting on you.</p>
+      <ul id="waiting-list" class="space-y-1.5"></ul>
+      <p id="waiting-error" class="hidden text-xs text-rose-500 mt-1"></p>
+    </div>
+
+  </div>
+
+  <script>
+    // Stampable initial state updated by hook-handler.mjs on PreInvocation / PreToolUse / Stop
+    const INITIAL_ARCADE_STATE = /*__ARCADE_STATE_START__*/{"state":"THINKING","lastEvent":"PreInvocation","harness":"antigravity","sessionId":"","detail":"Agent reasoning active","score":0,"highScore":0,"wave":1,"lives":3,"updatedAt":""}/*__ARCADE_STATE_END__*/;
+    const urlParams = new URLSearchParams(window.location.search || '');
+    const pathSessionMatch = (window.location.href || '').match(/\/brain\/([0-9a-f-]{36})\//i);
+    // Right Auxiliary Pane: embedded by Antigravity (iframe + host-injected window.sidecar). The pane shows the
+    // same cross-conversation view as the standalone window, but rows link to conversation://<id>.
+    const IN_PANE = urlParams.get('host') === 'pane' || (window.self !== window.top && Boolean(window.sidecar));
+    const GLOBAL_SCOPE = urlParams.get('scope') === 'global' || IN_PANE;
+    const SESSION_ID = GLOBAL_SCOPE ? '' :
+      window.sidecar?.conversationId ||
+      urlParams.get('conversationId') ||
+      urlParams.get('sessionId') ||
+      (pathSessionMatch ? pathSessionMatch[1] : '') ||
+      INITIAL_ARCADE_STATE.sessionId ||
+      '';
+    const CHECKPOINT_KEY = `thinking_arcade_wave_${SESSION_ID || 'default'}`;
+
+    const canvas = document.getElementById('invaders-canvas');
+    const ctx = canvas.getContext('2d');
+
+    let sessionState = INITIAL_ARCADE_STATE.state || 'THINKING';
+    let manualOverride = false;
+    let lastSeenUpdatedAt = INITIAL_ARCADE_STATE.updatedAt || '';
+    let score = Number(INITIAL_ARCADE_STATE.score) || 0;
+    let highScore = Number(INITIAL_ARCADE_STATE.highScore) || 0;
+    let wave = Number(INITIAL_ARCADE_STATE.wave) || 1;
+    let lives = INITIAL_ARCADE_STATE.lives !== undefined ? Math.max(1, Number(INITIAL_ARCADE_STATE.lives)) : 3;
+    let activeToolLabel = INITIAL_ARCADE_STATE.detail || '';
+
+    const player = { x: 276, y: 232, w: 48, h: 15, speed: 4.8 };
+    const keys = { left: false, right: false, fire: false };
+    let bullets = [];
+    let enemyBullets = [];
+    let particles = [];
+    let invaders = [];
+    let invaderDir = 1;
+    let invaderSpeed = 0.6;
+    let lastFireTime = 0;
+    let frameTick = 0;
+    let ufo = null;
+
+    const ROWS = [
+      { label: 'HALLUCIN', color: '#f43f5e', points: 30 },
+      { label: '500_LOOP', color: '#fb7185', points: 25 },
+      { label: 'CTX_DRIFT', color: '#f59e0b', points: 20 },
+      { label: 'RAW_GREP', color: '#a855f7', points: 10 }
+    ];
+
+    function spawnWave(waveNum) {
+      invaders = [];
+      invaderSpeed = 0.55 + Math.min(1.4, waveNum * 0.16);
+      const cols = 7;
+      for (let r = 0; r < ROWS.length; r++) {
+        for (let c = 0; c < cols; c++) {
+          invaders.push({
+            x: 42 + c * 74,
+            y: 34 + r * 30,
+            w: 58,
+            h: 20,
+            label: ROWS[r].label,
+            color: ROWS[r].color,
+            points: ROWS[r].points,
+            alive: true
+          });
+        }
+      }
+    }
+
+    function saveWaveCheckpoint() {
+      try {
+        localStorage.setItem(
+          CHECKPOINT_KEY,
+          JSON.stringify({
+            score,
+            highScore,
+            wave,
+            lives,
+            playerX: player.x,
+            invaderDir,
+            invaderSpeed,
+            invaders,
+          }),
+        );
+      } catch {}
+    }
+
+    function restoreWaveCheckpoint() {
+      try {
+        const raw = localStorage.getItem(CHECKPOINT_KEY);
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (!saved || !Array.isArray(saved.invaders) || !saved.invaders.some(i => i && i.alive)) {
+          return false;
+        }
+        score = Math.max(score, Number(saved.score) || 0);
+        highScore = Math.max(highScore, Number(saved.highScore) || 0, score);
+        wave = Math.max(1, Number(saved.wave) || 1);
+        lives = saved.lives !== undefined ? Math.max(1, Number(saved.lives)) : 3;
+        if (typeof saved.playerX === 'number') player.x = saved.playerX;
+        if (saved.invaderDir === 1 || saved.invaderDir === -1) invaderDir = saved.invaderDir;
+        invaderSpeed = 0.55 + Math.min(1.4, wave * 0.16);
+        invaders = saved.invaders;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    if (!restoreWaveCheckpoint()) {
+      spawnWave(wave);
+    }
+    document.getElementById('hud-score').textContent = score;
+    document.getElementById('hud-hiscore').textContent = highScore;
+    document.getElementById('hud-wave').textContent = wave;
+    document.getElementById('hud-lives').textContent = '❤️'.repeat(lives);
+
+    function isGamePlayable() {
+      if (manualOverride) return true;
+      return sessionState === 'THINKING' || sessionState === 'TOOL_RUNNING';
+    }
+
+    let lastAttention = [];
+    let lastActive = [];
+    async function ackAttention() {
+      try {
+        await fetch(`${SIDECAR_BASE}/api/ack`, { method: 'POST' });
+      } catch {}
+    }
+    window.addEventListener('keydown', e => {
+      if (!isGamePlayable() && GLOBAL_SCOPE && lastAttention.length && (e.key === 'Enter' || e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        ackAttention();
+        return;
+      }
+      if (!isGamePlayable()) return;
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+      if (e.key === ' ') {
+        e.preventDefault();
+        fireLaser();
+      }
+    });
+    window.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+    });
+    canvas.addEventListener('mousemove', e => {
+      if (!isGamePlayable()) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      player.x = Math.max(12, Math.min(canvas.width - player.w - 12, (e.clientX - rect.left) * scaleX - player.w / 2));
+    });
+    canvas.addEventListener('mousedown', () => {
+      if (!isGamePlayable()) return;
+      fireLaser();
+    });
+
+    function fireLaser() {
+      const now = performance.now();
+      if (now - lastFireTime < 210) return;
+      if (!isGamePlayable()) return;
+      lastFireTime = now;
+      bullets.push({ x: player.x + player.w / 2 - 2, y: player.y - 8, vy: -6.2 });
+    }
+
+    const WAIT_REASON = {
+      question: { label: 'Question', cls: 'bg-sky-500/20 text-sky-500 border-sky-500/30' },
+      approval: { label: 'Approval', cls: 'bg-amber-500/20 text-amber-500 border-amber-500/30' },
+      finished: { label: 'Finished', cls: 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30' },
+    };
+    function timeAgo(iso) {
+      const sec = Math.max(0, Math.round((Date.now() - (Date.parse(iso || '') || Date.now())) / 1000));
+      if (sec < 60) return 'just now';
+      if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+      return `${Math.round(sec / 3600)}h ago`;
+    }
+    async function openConversation(id, title) {
+      const errEl = document.getElementById('waiting-error');
+      errEl.classList.add('hidden');
+      // No per-conversation deep link exists, so copy the prompt to help find it in the sidebar.
+      try { if (title) await navigator.clipboard.writeText(title); } catch (_) { /* clipboard optional */ }
+      try {
+        const res = await fetch(`${SIDECAR_BASE}/api/focus`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      } catch (e) {
+        errEl.textContent = `Could not open Antigravity: ${e.message || e}`;
+        errEl.classList.remove('hidden');
+      }
+    }
+    let lastWaitingSignature = '';
+    function renderWaitingPanel(data) {
+      const panel = document.getElementById('waiting-panel');
+      if (!panel || !GLOBAL_SCOPE) return;
+      // Only the global payload carries `waiting`; ignore partial updates (stamped/initial state,
+      // sim buttons, image-probe fallback) so the list never blinks to empty and back.
+      if (!Array.isArray(data.waiting)) return;
+      const items = data.waiting;
+      const activeCount = Array.isArray(data.active) ? data.active.length : 0;
+      // The status poll runs every 750ms: rebuild the DOM only when something visible changed
+      // (age labels refresh at most once a minute), otherwise rows flicker and lose hover.
+      const signature = JSON.stringify([
+        activeCount,
+        items.slice(0, 8).map((it) => [it.id, it.reason, it.dismissed, it.lastUserInput, it.workspace, timeAgo(it.updatedAt)]),
+      ]);
+      if (signature === lastWaitingSignature) return;
+      lastWaitingSignature = signature;
+      panel.classList.remove('hidden');
+      document.getElementById('waiting-count').textContent = items.length ? `(${items.length})` : '';
+      document.getElementById('waiting-active').textContent = activeCount ? `${activeCount} working` : '';
+      document.getElementById('waiting-empty').classList.toggle('hidden', items.length > 0);
+      const list = document.getElementById('waiting-list');
+      list.replaceChildren(...items.slice(0, 8).map((it) => {
+        const r = WAIT_REASON[it.reason] || WAIT_REASON.finished;
+        const title = it.lastUserInput || `Conversation ${String(it.id).slice(0, 8)}`;
+        const li = document.createElement('li');
+        // Pane: experimental direct link to the conversation (works only if the host routes conversation:// from panes).
+        // Window: no per-conversation link exists, so bring Antigravity forward and copy the prompt.
+        const btn = document.createElement(IN_PANE ? 'a' : 'button');
+        if (IN_PANE) {
+          btn.href = `conversation://${it.id}`;
+          btn.title = 'Open this conversation';
+        } else {
+          btn.type = 'button';
+          btn.title = 'Bring Antigravity to the front (prompt copied to clipboard)';
+          btn.addEventListener('click', () => openConversation(it.id, it.lastUserInput || ''));
+        }
+        btn.className = `w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--secondary)] transition no-underline ${it.dismissed ? 'opacity-60' : ''}`;
+        const chip = document.createElement('span');
+        chip.className = `shrink-0 px-1.5 py-0.5 rounded-full border text-xs font-mono ${r.cls}`;
+        chip.textContent = r.label;
+        const text = document.createElement('span');
+        text.className = 'flex-1 min-w-0';
+        const t1 = document.createElement('span');
+        t1.className = 'block truncate text-sm text-[var(--foreground)]';
+        t1.textContent = title;
+        const t2 = document.createElement('span');
+        t2.className = 'block text-xs text-[var(--muted-foreground)]';
+        t2.textContent = [it.workspace, timeAgo(it.updatedAt)].filter(Boolean).join(' · ');
+        text.append(t1, t2);
+        const go = document.createElement('span');
+        go.className = 'shrink-0 text-xs font-semibold text-sky-500';
+        go.textContent = IN_PANE ? 'Go to chat →' : 'Open ↗';
+        btn.append(chip, text, go);
+        li.append(btn);
+        return li;
+      }));
+    }
+
+    function applySidecarState(data) {
+      if (!data) return;
+      renderWaitingPanel(data);
+      const prevState = sessionState;
+      const isNewEvent = Boolean(data.updatedAt && data.updatedAt !== lastSeenUpdatedAt);
+      if (data.updatedAt) {
+        lastSeenUpdatedAt = data.updatedAt;
+      }
+      sessionState = data.state || 'IDLE';
+
+      if (sessionState === 'IDLE' && (isNewEvent || prevState !== 'IDLE')) {
+        keys.left = false;
+        keys.right = false;
+        keys.fire = false;
+        saveWaveCheckpoint();
+        if (manualOverride && isNewEvent) {
+          manualOverride = false;
+          const btn = document.getElementById('btn-demo-override');
+          if (btn) {
+            btn.textContent = '⚡ Sim Thinking';
+          }
+        }
+      }
+
+      if (typeof data.highScore === 'number' && data.highScore > highScore) {
+        highScore = data.highScore;
+        document.getElementById('hud-hiscore').textContent = highScore;
+      }
+      activeToolLabel = data.detail || data.toolName || '';
+
+      const pill = document.getElementById('session-pill');
+      const dot = document.getElementById('session-dot');
+      const stateText = document.getElementById('session-state-text');
+      const subtitle = document.getElementById('activity-subtitle');
+      const overlay = document.getElementById('gate-overlay');
+      const gatePill = document.getElementById('gate-pill');
+      const gateTitle = document.getElementById('gate-title');
+      const gateDesc = document.getElementById('gate-desc');
+      document.getElementById('gate-score').textContent = Math.max(score, highScore);
+
+      if (isGamePlayable()) {
+        overlay.classList.add('hidden');
+        if (prevState === 'IDLE' && isNewEvent) {
+          try {
+            window.sidecar?.ui?.toggleAuxPane?.({ open: true });
+          } catch {}
+        }
+        if (sessionState === 'TOOL_RUNNING') {
+          pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 flex items-center gap-1.5';
+          dot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-ping';
+          stateText.textContent = 'EXECUTING TOOL';
+          subtitle.textContent = `Active hook: ${data.lastEvent || 'PreToolUse'} (${activeToolLabel || 'tool_call'})`;
+          if (!ufo && data.spawnUfoOnToolUse !== false) {
+            ufo = { x: -70, y: 12, w: 68, h: 16, vx: 2.2, label: activeToolLabel.slice(0, 9) || 'SUBAGENT' };
+          }
+        } else {
+          pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5';
+          dot.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
+          stateText.textContent = manualOverride ? 'SIM THINKING' : 'AGENT THINKING';
+          subtitle.textContent = `Hook: ${data.lastEvent || 'PreInvocation'} — Wave Active (←/→ or mouse, SPACE/click to fire)`;
+        }
+      } else {
+        overlay.classList.remove('hidden');
+        lastAttention = Array.isArray(data.attention) ? data.attention : [];
+        lastActive = Array.isArray(data.active) ? data.active : [];
+        const keepBtn = document.getElementById('btn-keep-playing');
+        if (keepBtn) keepBtn.classList.toggle('hidden', !(GLOBAL_SCOPE && lastAttention.some(a => a.reason === 'finished')));
+        if (GLOBAL_SCOPE && lastAttention.length) {
+          const reasons = { finished: 'finished', question: 'is asking you a question', approval: 'needs approval' };
+          pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-sky-500/20 text-sky-500 border border-sky-500/30 flex items-center gap-1.5';
+          dot.className = 'w-2 h-2 rounded-full bg-sky-500 animate-bounce';
+          stateText.textContent = 'NEEDS YOU';
+          subtitle.textContent = data.detail || '';
+          gatePill.textContent = `${lastAttention.length} CONVERSATION${lastAttention.length > 1 ? 'S' : ''} WAITING FOR YOU`;
+          gateTitle.textContent = 'Paused: a conversation needs you in Antigravity';
+          gateDesc.textContent = lastAttention
+            .slice(0, 3)
+            .map(a => `“${a.lastUserInput || a.id.slice(0, 8)}” ${reasons[a.reason] || 'needs you'}`)
+            .join(' · ') + (lastActive.length ? ` — ${lastActive.length} still working. Press Enter to keep playing.` : '');
+        } else if (sessionState === 'WAITING_FOR_APPROVAL') {
+          pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-sky-500/20 text-sky-500 border border-sky-500/30 flex items-center gap-1.5';
+          dot.className = 'w-2 h-2 rounded-full bg-sky-500 animate-bounce';
+          stateText.textContent = 'WAITING FOR APPROVAL';
+          gatePill.textContent = 'ACTION REQUIRED — AGENT BLOCKED ON PERMISSION';
+          gateTitle.textContent = 'Paused: Agent Needs Your Confirmation in Chat';
+          gateDesc.textContent = 'Approve or deny the pending tool call. The wave will resume automatically once the agent continues.';
+        } else {
+          pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-rose-500/20 text-rose-500 border border-rose-500/30 flex items-center gap-1.5';
+          dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+          stateText.textContent = 'SESSION IDLE';
+          subtitle.textContent = `Hook: ${data.lastEvent || 'Stop'} — Response Complete (Game Paused)`;
+          gatePill.textContent = 'SESSION IDLE — RESPONSE COMPLETE';
+          gateTitle.textContent = 'Model Invaders Auto-Paused by Stop Hook';
+        }
+      }
+    }
+
+    // Apply initial stamped state immediately on script load
+    applySidecarState(INITIAL_ARCADE_STATE);
+
+    function toggleManualOverride() {
+      manualOverride = !manualOverride;
+      const btn = document.getElementById('btn-demo-override');
+      btn.textContent = manualOverride ? '⚡ Sim Active (On)' : '⚡ Sim Thinking';
+      applySidecarState({ state: sessionState, highScore });
+    }
+
+    async function openFloatingArcade() {
+      const targetUrl = `http://127.0.0.1:4777${SESSION_ID ? '?sessionId=' + encodeURIComponent(SESSION_ID) : ''}`;
+      try {
+        if ('documentPictureInPicture' in window) {
+          const pipWin = await window.documentPictureInPicture.requestWindow({
+            width: 640,
+            height: 410,
+          });
+          const iframe = pipWin.document.createElement('iframe');
+          iframe.src = targetUrl;
+          iframe.style.cssText = 'width:100%;height:100%;border:0;margin:0;padding:0;background:#070a12;';
+          pipWin.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#070a12;';
+          pipWin.document.body.appendChild(iframe);
+          return;
+        }
+      } catch {}
+      window.open(
+        targetUrl,
+        'ThinkingArcadePiP',
+        'width=640,height=420,menubar=no,toolbar=no,location=no,status=no,resizable=yes',
+      );
+    }
+
+    const SIDECAR_BASE =
+      window.location.protocol === 'http:' || window.location.protocol === 'https:'
+        ? ''
+        : 'http://127.0.0.1:4777';
+
+    async function triggerHookState(state, eventName, detail) {
+      if (state === 'THINKING' || state === 'TOOL_RUNNING') {
+        manualOverride = false;
+        document.getElementById('btn-demo-override').textContent = '⚡ Sim Thinking';
+      }
+      try {
+        const res = await fetch(`${SIDECAR_BASE}/api/event`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, event: eventName, detail, harness: 'antigravity', score })
+        });
+        if (res.ok) {
+          const payload = await res.json();
+          applySidecarState(payload.status);
+          return;
+        }
+      } catch {}
+      applySidecarState({
+        state,
+        lastEvent: eventName,
+        detail,
+        updatedAt: new Date().toISOString(),
+        highScore: Math.max(score, highScore)
+      });
+    }
+
+    async function syncScoreToServer() {
+      if (score > highScore) {
+        highScore = score;
+        document.getElementById('hud-hiscore').textContent = highScore;
+      }
+      saveWaveCheckpoint();
+      try {
+        await fetch(`${SIDECAR_BASE}/api/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ score, highScore, wave, lives })
+        });
+      } catch {}
+    }
+
+    async function pollSidecarStatus() {
+      const qs = SESSION_ID ? `?sessionId=${encodeURIComponent(SESSION_ID)}&t=${Date.now()}` : `?t=${Date.now()}`;
+      try {
+        const res = await fetch(`${SIDECAR_BASE}/api/status${qs}`, { cache: 'no-store' });
+        if (res.ok) {
+          const msg = await res.json();
+          document.getElementById('sse-conn-indicator').textContent = '● LIVE';
+          applySidecarState(msg);
+          return;
+        }
+      } catch {}
+
+      // Fallback 1: Image dimension probe (/api/state.svg) for iframes where connect-src is blocked but img-src is open
+      try {
+        await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            const stateByWidth = {
+              1: 'IDLE',
+              2: 'THINKING',
+              3: 'TOOL_RUNNING',
+              4: 'WAITING_FOR_APPROVAL'
+            };
+            const mappedState = stateByWidth[img.naturalWidth] || 'IDLE';
+            document.getElementById('sse-conn-indicator').textContent = '● IMG SYNC';
+            applySidecarState({
+              state: mappedState,
+              lastEvent: mappedState === 'IDLE' ? 'Stop' : 'PreInvocation',
+              highScore: img.naturalHeight > 1 ? img.naturalHeight : highScore,
+              updatedAt: mappedState !== sessionState ? new Date().toISOString() : lastSeenUpdatedAt
+            });
+            resolve(true);
+          };
+          img.onerror = reject;
+          img.src = `${SIDECAR_BASE}/api/state.svg${qs}`;
+        });
+        return;
+      } catch {}
+
+      // Fallback 2: Same-origin file read if stamped on disk
+      try {
+        const selfRes = await fetch(window.location.href, { cache: 'no-store' });
+        if (selfRes.ok) {
+          const text = await selfRes.text();
+          const m = text.match(/\/\*__ARCADE_STATE_START__\*\/([\s\S]*?)\/\*__ARCADE_STATE_END__\*\//);
+          if (m && m[1]) {
+            const parsed = JSON.parse(m[1]);
+            applySidecarState(parsed);
+          }
+        }
+      } catch {}
+    }
+
+    function connectSSE() {
+      pollSidecarStatus();
+      setInterval(pollSidecarStatus, 750);
+      try {
+        const es = new EventSource(`${SIDECAR_BASE}/events${IN_PANE ? '?scope=global&host=pane' : GLOBAL_SCOPE ? '?scope=global' : ''}`);
+        es.onopen = () => {
+          document.getElementById('sse-conn-indicator').textContent = '● SSE LIVE';
+        };
+        es.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (SESSION_ID && msg.sessions && msg.sessions[SESSION_ID]) {
+              const s = msg.sessions[SESSION_ID];
+              applySidecarState({
+                ...msg,
+                sessionId: SESSION_ID,
+                state: s.state || msg.state,
+                lastEvent: s.lastEvent || msg.lastEvent,
+                detail: s.detail ?? msg.detail,
+                updatedAt: s.updatedAt || msg.updatedAt,
+              });
+              return;
+            }
+            if (SESSION_ID && msg.sessionId && msg.sessionId !== SESSION_ID) {
+              return;
+            }
+            applySidecarState(msg);
+          } catch {}
+        };
+      } catch {}
+    }
+    connectSSE();
+
+    function renderLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 30) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 30) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      if (isGamePlayable()) {
+        frameTick += 1;
+        if (frameTick % 45 === 0) {
+          saveWaveCheckpoint();
+        }
+        if (keys.left) player.x = Math.max(12, player.x - player.speed);
+        if (keys.right) player.x = Math.min(canvas.width - player.w - 12, player.x + player.speed);
+
+        if (ufo) {
+          ufo.x += ufo.vx;
+          if (ufo.x > canvas.width + 80) ufo = null;
+        }
+
+        let hitEdge = false;
+        const aliveInvaders = invaders.filter(i => i.alive);
+        aliveInvaders.forEach(inv => {
+          inv.x += invaderDir * invaderSpeed;
+          if (inv.x + inv.w > canvas.width - 12 || inv.x < 12) hitEdge = true;
+        });
+        if (hitEdge) {
+          invaderDir *= -1;
+          aliveInvaders.forEach(inv => {
+            inv.y += 10;
+            if (inv.y + inv.h >= player.y) {
+              lives = Math.max(1, lives - 1);
+              document.getElementById('hud-lives').textContent = '❤️'.repeat(lives);
+              spawnWave(wave);
+            }
+          });
+        }
+
+        if (aliveInvaders.length > 0 && Math.random() < 0.02) {
+          const shooter = aliveInvaders[Math.floor(Math.random() * aliveInvaders.length)];
+          enemyBullets.push({ x: shooter.x + shooter.w / 2, y: shooter.y + shooter.h, vy: 3.0 });
+        }
+
+        bullets.forEach(b => {
+          b.y += b.vy;
+          if (ufo && b.x >= ufo.x && b.x <= ufo.x + ufo.w && b.y >= ufo.y && b.y <= ufo.y + ufo.h) {
+            b.hit = true;
+            score += 100;
+            for (let i = 0; i < 10; i++) {
+              particles.push({ x: ufo.x + ufo.w / 2, y: ufo.y + 8, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 18, color: '#10b981' });
+            }
+            ufo = null;
+            document.getElementById('hud-score').textContent = score;
+            syncScoreToServer();
+          }
+          invaders.forEach(inv => {
+            if (!inv.alive || b.hit) return;
+            if (b.x >= inv.x && b.x <= inv.x + inv.w && b.y >= inv.y && b.y <= inv.y + inv.h) {
+              inv.alive = false;
+              b.hit = true;
+              score += inv.points;
+              document.getElementById('hud-score').textContent = score;
+              for (let i = 0; i < 7; i++) {
+                particles.push({ x: inv.x + inv.w / 2, y: inv.y + inv.h / 2, vx: (Math.random() - 0.5) * 3.5, vy: (Math.random() - 0.5) * 3.5, life: 15, color: inv.color });
+              }
+              syncScoreToServer();
+            }
+          });
+        });
+        bullets = bullets.filter(b => !b.hit && b.y > -10);
+
+        enemyBullets.forEach(eb => {
+          eb.y += eb.vy;
+          if (eb.x >= player.x && eb.x <= player.x + player.w && eb.y >= player.y && eb.y <= player.y + player.h) {
+            eb.hit = true;
+            lives = Math.max(1, lives - 1);
+            document.getElementById('hud-lives').textContent = '❤️'.repeat(lives);
+          }
+        });
+        enemyBullets = enemyBullets.filter(eb => !eb.hit && eb.y < canvas.height + 10);
+
+        if (invaders.every(i => !i.alive)) {
+          wave += 1;
+          document.getElementById('hud-wave').textContent = wave;
+          spawnWave(wave);
+          syncScoreToServer();
+        }
+      }
+
+      if (ufo) {
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.roundRect(ufo.x, ufo.y, ufo.w, ufo.h, 5);
+        ctx.fill();
+        ctx.fillStyle = '#052e16';
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText(ufo.label, ufo.x + 5, ufo.y + 12);
+      }
+
+      ctx.font = 'bold 10px monospace';
+      invaders.forEach(inv => {
+        if (!inv.alive) return;
+        ctx.fillStyle = inv.color;
+        ctx.beginPath();
+        ctx.roundRect(inv.x, inv.y, inv.w, inv.h, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(inv.label, inv.x + 5, inv.y + 13);
+      });
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.roundRect(player.x, player.y, player.w, player.h, 4);
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText('GUARDIAN', player.x + 4, player.y + 11);
+
+      ctx.fillStyle = '#f59e0b';
+      bullets.forEach(b => {
+        ctx.fillRect(b.x, b.y, 4, 9);
+      });
+
+      ctx.fillStyle = '#f43f5e';
+      enemyBullets.forEach(eb => {
+        ctx.fillRect(eb.x, eb.y, 3, 8);
+      });
+
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 1;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
+      particles = particles.filter(p => p.life > 0);
+
+      requestAnimationFrame(renderLoop);
+    }
+    requestAnimationFrame(renderLoop);
+  </script>
+</body>
+</html>

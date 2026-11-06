@@ -107,6 +107,7 @@ export interface EdgeSummary {
     callSiteLine: number;
 }
 export interface SymbolNeighborhood {
+    query?: string;
     symbol: SymbolSummary | null;
     matches: SymbolSummary[];
     callers: EdgeSummary[];

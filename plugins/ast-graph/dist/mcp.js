@@ -96,12 +96,27 @@ export function normalizeMcpToolArgs(toolName, rawArgs) {
             'path',
             'uris',
             'uri',
+            'symbolOrFile',
+            'symbolsOrFiles',
+            'symbol_or_file',
             'targets',
             'target',
             'queries',
             'query',
         ]
-        : ['filePaths', 'filePath', 'files', 'file', 'paths', 'path', 'uris', 'uri'];
+        : [
+            'filePaths',
+            'filePath',
+            'files',
+            'file',
+            'paths',
+            'path',
+            'uris',
+            'uri',
+            'symbolOrFile',
+            'symbolsOrFiles',
+            'symbol_or_file',
+        ];
     const symbolAliasKeys = [
         'queries',
         'query',
@@ -109,10 +124,16 @@ export function normalizeMcpToolArgs(toolName, rawArgs) {
         'target',
         'symbols',
         'symbol',
+        'symbolOrFile',
+        'symbolsOrFiles',
+        'symbol_or_file',
         'names',
         'name',
         'nodes',
         'node',
+        'endpoint',
+        'route',
+        'schema',
         'filePaths',
         'filePath',
         'files',
@@ -170,7 +191,6 @@ export const MCP_TOOLS_MANIFEST = [
                 limit: { type: 'number', description: 'Maximum callers/callees/tests to return (default: 20)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['query'],
         },
     },
     {
@@ -188,13 +208,17 @@ export const MCP_TOOLS_MANIFEST = [
                     items: { type: 'string' },
                     description: 'Optional batch array of property/symbol targets to inspect in a single call',
                 },
+                queries: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Alias for targets: optional batch array of property/symbol queries',
+                },
                 limit: {
                     type: 'number',
                     description: 'Maximum read/write references to return per category (default: 25)',
                 },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['target'],
         },
     },
     {
@@ -224,7 +248,6 @@ export const MCP_TOOLS_MANIFEST = [
                 limit: { type: 'number', description: 'Maximum symbols to return (default: 40; output is capped at ~3.8KB inline)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['filePath'],
         },
     },
     {
@@ -234,6 +257,11 @@ export const MCP_TOOLS_MANIFEST = [
             type: 'object',
             properties: {
                 query: { type: 'string', description: 'Symbol search query' },
+                queries: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional batch array of symbol search queries to run in a single call',
+                },
                 kind: {
                     type: 'string',
                     description: 'Optional NodeKind filter (Function, Class, Property, ZodSchema, RouteEndpoint, etc.)',
@@ -241,7 +269,6 @@ export const MCP_TOOLS_MANIFEST = [
                 limit: { type: 'number', description: 'Maximum matches to return (default: 15; output is capped at ~3.8KB inline)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['query'],
         },
     },
     {
@@ -251,10 +278,15 @@ export const MCP_TOOLS_MANIFEST = [
             type: 'object',
             properties: {
                 target: { type: 'string', description: 'Symbol name, SCIP URI, or file path' },
+                targets: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional batch array of symbols or files',
+                },
+                symbolOrFile: { type: 'string', description: 'Alias for target: symbol name, SCIP URI, or file path' },
                 maxHops: { type: 'number', description: 'Maximum upstream traversal hops (default: 3)' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['target'],
         },
     },
     {
@@ -264,9 +296,14 @@ export const MCP_TOOLS_MANIFEST = [
             type: 'object',
             properties: {
                 target: { type: 'string', description: 'Symbol name, SCIP URI, or file path' },
+                targets: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional batch array of symbols or files',
+                },
+                symbolOrFile: { type: 'string', description: 'Alias for target: symbol name, SCIP URI, or file path' },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['target'],
         },
     },
     {
@@ -276,9 +313,13 @@ export const MCP_TOOLS_MANIFEST = [
             type: 'object',
             properties: {
                 target: { type: 'string', description: 'Schema name, route endpoint, SQL table, or Terraform resource' },
+                targets: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional batch array of lineage targets',
+                },
                 workspace: WORKSPACE_PARAM_SCHEMA,
             },
-            required: ['target'],
         },
     },
     {
@@ -899,7 +940,15 @@ export class AstMcpServer {
                 };
                 const cliCmd = toolToCliCommand[toolName];
                 const rawJsonRequested = Boolean(args.rawJson) || args.format === 'json';
-                const primaryLabel = String(args.query ?? args.filePath ?? args.target ?? args.from ?? '');
+                const primaryLabel = String(args.query ??
+                    args.filePath ??
+                    args.target ??
+                    args.symbolOrFile ??
+                    args.from ??
+                    norm.symbolTargets[0] ??
+                    norm.filePaths[0] ??
+                    norm.fromTarget ??
+                    '');
                 const formattedText = cliCmd && !rawJsonRequested
                     ? formatCompactCliOutput(cliCmd, payload, primaryLabel)
                     : JSON.stringify(payload, null, 2);

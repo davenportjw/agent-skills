@@ -1,0 +1,21 @@
+{
+  "name": "thinking-arcade",
+  "displayName": "Thinking Arcade — Model Invaders Sidecar",
+  "version": "1.1.0",
+  "description": "Session-gated Space Invaders sidecar game (Model Invaders) that plays while your coding agents are thinking or running tools, pauses when any conversation needs you, and lists those conversations with one-click links back. Works with Google Antigravity, Claude Code, and OpenAI Codex CLI.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "Jason Davenport",
+    "url": "https://github.com/davenportjw"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davenportjw/agent-skills"
+  },
+  "disabled": false,
+  "suggestedPrompts": [
+    "Show my Thinking Arcade status and which conversations need me",
+    "Switch Model Invaders to the Right Auxiliary Pane",
+    "Configure Thinking Arcade hooks for Claude Code and OpenAI Codex CLI"
+  ]
+}

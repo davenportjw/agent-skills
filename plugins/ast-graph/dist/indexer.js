@@ -11,7 +11,7 @@ import { PythonCompilerAdapter } from './adapters/python-adapter.js';
 import { RustCompilerAdapter } from './adapters/rust-adapter.js';
 import { SqlCompilerAdapter } from './adapters/sql-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
-import { TypeScriptCompilerAdapter } from './adapters/ts-adapter.js';
+import { TypeScriptCompilerAdapter, isPublicMember } from './adapters/ts-adapter.js';
 import { WebCompilerAdapter } from './adapters/web-adapter.js';
 import { assessWorkspace, canonicalizeWorkspaceRoot } from './assessor.js';
 export class AstGraphIndexer {
@@ -506,8 +506,21 @@ export class AstGraphIndexer {
             const sha256 = crypto.createHash('sha256').update(content).digest('hex');
             const lineCount = content.split('\n').length;
             const pkg = findPkg(relPath);
-            const language = relPath.endsWith('.mjs') ? 'javascript' : 'typescript';
-            const isTestFile = relPath.endsWith('.test.ts') || relPath.includes('/test/');
+            const language = relPath.endsWith('.mjs') ||
+                relPath.endsWith('.cjs') ||
+                relPath.endsWith('.js') ||
+                relPath.endsWith('.jsx')
+                ? 'javascript'
+                : 'typescript';
+            const isTestFile = relPath.endsWith('.test.ts') ||
+                relPath.endsWith('.test.tsx') ||
+                relPath.endsWith('.spec.ts') ||
+                relPath.endsWith('.spec.tsx') ||
+                relPath.endsWith('.test.js') ||
+                relPath.endsWith('.test.jsx') ||
+                relPath.endsWith('.spec.js') ||
+                relPath.includes('/test/') ||
+                relPath.includes('/__tests__/');
             filesBatch.push({
                 filePath: relPath,
                 packageName: pkg.name,
@@ -549,15 +562,26 @@ export class AstGraphIndexer {
                 weight: 1,
                 properties: {},
             });
-            const sf = ts.createSourceFile(absPath, content, ts.ScriptTarget.ES2023, true);
+            const scriptKind = relPath.endsWith('.tsx')
+                ? ts.ScriptKind.TSX
+                : relPath.endsWith('.jsx')
+                    ? ts.ScriptKind.JSX
+                    : language === 'javascript'
+                        ? ts.ScriptKind.JS
+                        : ts.ScriptKind.TS;
+            const sf = ts.createSourceFile(absPath, content, ts.ScriptTarget.ES2023, true, scriptKind);
             const posToLineCol = (pos) => {
                 const lc = sf.getLineAndCharacterOfPosition(pos);
                 return { line: lc.line + 1, col: lc.character + 1 };
             };
             // Pre-register local declarations in this file
-            const visitLocalDecls = (node) => {
+            const visitLocalDecls = (node, containerName) => {
                 if (ts.isFunctionDeclaration(node) && node.name) {
-                    symbolByName.set(node.name.text, makeSymId(`${node.name.text}().`));
+                    const fnName = node.name.text;
+                    const desc = containerName ? `${containerName}#${fnName}().` : `${fnName}().`;
+                    symbolByName.set(fnName, makeSymId(desc));
+                    ts.forEachChild(node, (c) => visitLocalDecls(c, fnName));
+                    return;
                 }
                 else if (ts.isClassDeclaration(node) && node.name) {
                     const className = node.name.text;
@@ -581,14 +605,34 @@ export class AstGraphIndexer {
                     }
                 }
                 else if (ts.isTypeAliasDeclaration(node) && node.name) {
-                    symbolByName.set(node.name.text, makeSymId(`${node.name.text}#`));
+                    const typeName = node.name.text;
+                    symbolByName.set(typeName, makeSymId(`${typeName}#`));
+                    ts.forEachChild(node, (c) => visitLocalDecls(c, typeName));
+                    return;
+                }
+                else if (ts.isPropertySignature(node) && node.name && ts.isIdentifier(node.name) && containerName) {
+                    propertyByName.set(node.name.text, makeSymId(`${containerName}#${node.name.text}.`));
                 }
                 else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-                    symbolByName.set(node.name.text, makeSymId(`${node.name.text}.`));
+                    const varName = node.name.text;
+                    const isFuncLike = node.initializer &&
+                        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer));
+                    const desc = containerName
+                        ? isFuncLike
+                            ? `${containerName}#${varName}().`
+                            : `${containerName}#${varName}.`
+                        : isFuncLike
+                            ? `${varName}().`
+                            : `${varName}.`;
+                    symbolByName.set(varName, makeSymId(desc));
+                    if (isFuncLike && node.initializer) {
+                        ts.forEachChild(node.initializer, (c) => visitLocalDecls(c, varName));
+                        return;
+                    }
                 }
-                ts.forEachChild(node, visitLocalDecls);
+                ts.forEachChild(node, (c) => visitLocalDecls(c, containerName));
             };
-            ts.forEachChild(sf, visitLocalDecls);
+            ts.forEachChild(sf, (c) => visitLocalDecls(c));
             const symbolStack = [
                 { id: fileNodeId, kind: 'File', name: path.basename(relPath) },
             ];
@@ -625,14 +669,17 @@ export class AstGraphIndexer {
                 }
                 if (ts.isFunctionDeclaration(node) && node.name) {
                     const fnName = node.name.text;
-                    const fnId = makeSymId(`${fnName}().`);
+                    const enclosing = currentEnclosing();
+                    const containerPrefix = enclosing.kind !== 'File' ? `${enclosing.name}#` : '';
+                    const fnId = makeSymId(`${containerPrefix}${fnName}().`);
                     const exported = Boolean(ts.canHaveModifiers(node) &&
                         ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword));
+                    const qualName = enclosing.kind !== 'File' ? `${pkg.name}/${enclosing.name}.${fnName}` : `${pkg.name}/${fnName}`;
                     addNode({
                         id: fnId,
                         kind: 'Function',
                         name: fnName,
-                        qualifiedName: `${pkg.name}/${fnName}`,
+                        qualifiedName: qualName,
                         packageName: pkg.name,
                         filePath: relPath,
                         language,
@@ -648,7 +695,7 @@ export class AstGraphIndexer {
                         properties: {},
                     });
                     addEdge({
-                        srcId: currentEnclosing().id,
+                        srcId: enclosing.id,
                         dstId: fnId,
                         kind: 'CONTAINS',
                         filePath: relPath,
@@ -786,6 +833,10 @@ export class AstGraphIndexer {
                         weight: 1,
                         properties: {},
                     });
+                    symbolStack.push({ id: typeId, kind: 'TypeAlias', name: typeName });
+                    ts.forEachChild(node, visit);
+                    symbolStack.pop();
+                    return;
                 }
                 if (ts.isMethodDeclaration(node) && node.name) {
                     const methodName = node.name.getText(sf);
@@ -805,7 +856,7 @@ export class AstGraphIndexer {
                         endCol: endPos.col,
                         signature: `${enclosing.name}.${methodName}()`,
                         docstring: '',
-                        exported: true,
+                        exported: isPublicMember(node),
                         complexity: 1,
                         labels: ['Method'],
                         properties: {},
@@ -830,7 +881,9 @@ export class AstGraphIndexer {
                     ts.isIdentifier(node.name)) {
                     const propName = node.name.text;
                     const enclosing = currentEnclosing();
-                    if (enclosing.kind === 'Class' || enclosing.kind === 'Interface') {
+                    if (enclosing.kind === 'Class' ||
+                        enclosing.kind === 'Interface' ||
+                        enclosing.kind === 'TypeAlias') {
                         const propId = makeSymId(`${enclosing.name}#${propName}.`);
                         propertyByName.set(propName, propId);
                         addNode({
@@ -847,7 +900,7 @@ export class AstGraphIndexer {
                             endCol: endPos.col,
                             signature: node.getText(sf).replace(/\s+/g, ' ').trim().slice(0, 200),
                             docstring: '',
-                            exported: true,
+                            exported: isPublicMember(node),
                             complexity: 1,
                             labels: ['Property'],
                             properties: { container: enclosing.name, containerKind: enclosing.kind },
@@ -868,47 +921,64 @@ export class AstGraphIndexer {
                     const exported = Boolean(ts.canHaveModifiers(node) &&
                         ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword));
                     for (const decl of node.declarationList.declarations) {
-                        if (ts.isIdentifier(decl.name) && (exported || currentEnclosing().kind === 'File')) {
+                        if (ts.isIdentifier(decl.name)) {
                             const varName = decl.name.text;
                             const initText = decl.initializer ? decl.initializer.getText(sf) : '';
                             const isZod = initText.includes('z.') || varName.endsWith('Schema');
-                            const varId = makeSymId(`${varName}.`);
-                            const kind = isZod ? 'ZodSchema' : 'Variable';
-                            const dStart = posToLineCol(decl.getStart(sf));
-                            const dEnd = posToLineCol(decl.getEnd());
-                            addNode({
-                                id: varId,
-                                kind,
-                                name: varName,
-                                qualifiedName: `${pkg.name}/${varName}`,
-                                packageName: pkg.name,
-                                filePath: relPath,
-                                language,
-                                startLine: dStart.line,
-                                startCol: dStart.col,
-                                endLine: dEnd.line,
-                                endCol: dEnd.col,
-                                signature: `${exported ? 'export ' : ''}const ${varName}`,
-                                docstring: '',
-                                exported,
-                                complexity: 1,
-                                labels: isZod ? ['ZodSchema', 'Variable'] : ['Variable'],
-                                properties: {},
-                            });
-                            addEdge({
-                                srcId: currentEnclosing().id,
-                                dstId: varId,
-                                kind: 'CONTAINS',
-                                filePath: relPath,
-                                line: dStart.line,
-                                col: dStart.col,
-                                weight: 1,
-                                properties: {},
-                            });
-                            if (decl.initializer) {
-                                symbolStack.push({ id: varId, kind, name: varName });
+                            const isFunc = decl.initializer &&
+                                (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer));
+                            const enclosing = currentEnclosing();
+                            if (exported || isZod || isFunc || enclosing.kind === 'File') {
+                                const containerPrefix = enclosing.kind !== 'File' ? `${enclosing.name}#` : '';
+                                const varId = makeSymId(isFunc ? `${containerPrefix}${varName}().` : `${containerPrefix}${varName}.`);
+                                const kind = isZod ? 'ZodSchema' : isFunc ? 'Function' : 'Variable';
+                                const labels = isZod
+                                    ? ['ZodSchema', 'Variable']
+                                    : isFunc
+                                        ? ['Function', 'ArrowFunction', 'Variable']
+                                        : ['Variable'];
+                                const dStart = posToLineCol(decl.getStart(sf));
+                                const dEnd = posToLineCol(decl.getEnd());
+                                const qualName = enclosing.kind !== 'File'
+                                    ? `${pkg.name}/${enclosing.name}.${varName}`
+                                    : `${pkg.name}/${varName}`;
+                                addNode({
+                                    id: varId,
+                                    kind,
+                                    name: varName,
+                                    qualifiedName: qualName,
+                                    packageName: pkg.name,
+                                    filePath: relPath,
+                                    language,
+                                    startLine: dStart.line,
+                                    startCol: dStart.col,
+                                    endLine: dEnd.line,
+                                    endCol: dEnd.col,
+                                    signature: `${exported ? 'export ' : ''}const ${varName}`,
+                                    docstring: '',
+                                    exported,
+                                    complexity: 1,
+                                    labels,
+                                    properties: {},
+                                });
+                                addEdge({
+                                    srcId: enclosing.id,
+                                    dstId: varId,
+                                    kind: 'CONTAINS',
+                                    filePath: relPath,
+                                    line: dStart.line,
+                                    col: dStart.col,
+                                    weight: 1,
+                                    properties: {},
+                                });
+                                if (decl.initializer) {
+                                    symbolStack.push({ id: varId, kind, name: varName });
+                                    visit(decl.initializer);
+                                    symbolStack.pop();
+                                }
+                            }
+                            else if (decl.initializer) {
                                 visit(decl.initializer);
-                                symbolStack.pop();
                             }
                         }
                         else if (decl.initializer) {

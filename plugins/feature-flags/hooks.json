@@ -1,0 +1,31 @@
+{
+  "feature-flags-runtime": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./scripts/hook-handler.mjs session-start",
+        "timeout": 5
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/hook-handler.mjs pre-invocation",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hook-handler.mjs pre-tool-use",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

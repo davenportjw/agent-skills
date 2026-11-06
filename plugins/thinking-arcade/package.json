@@ -1,0 +1,11 @@
+{
+  "name": "@agent-skills/thinking-arcade",
+  "version": "1.0.0",
+  "description": "Session-gated Model Invaders sidecar game for Google Antigravity, Claude Code, and OpenAI Codex CLI.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node ./scripts/arcade-server.mjs",
+    "test": "npx --prefix ../ast-graph vitest run --root ."
+  }
+}

@@ -12,11 +12,11 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
 ## 1. Supported Languages & Cross-Layer Adapters
 
 1. **TypeScript / JavaScript (`ts-compiler`)**:
-   - Supports npm/Wireit monorepos and single-package TS/JS repos (`allowJs: true`).
-   - Extracts functions, classes, methods, properties, `READS_PROPERTY` / `WRITES_PROPERTY`, Zod schemas (`VALIDATES_SCHEMA`), Fastify HTTP/WebSocket routes (`HANDLES_ROUTE`), `fetch('/api/...')` client calls (`CALLS_ROUTE`), WebMCP `navigator.modelContext.registerTool` tools, and Vitest `describe`/`it`/`test` suites (`TESTS_SYMBOL`).
+   - Supports npm/Wireit monorepos and single-package TS/TSX/JS/JSX repos (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `allowJs: true`, `jsx: Preserve`).
+   - Extracts top-level and nested functions (including React component inner handlers like `App#handleCreateNewShow().`), classes, methods, interface & `type` alias properties, `READS_PROPERTY` (including object destructuring `const { prop } = obj`) / `WRITES_PROPERTY` (including assignment, mutating collection calls `.push`/`.splice`/`.set`/`.delete`, and object-literal property initializers), Zod schemas (`VALIDATES_SCHEMA`), Fastify HTTP/WebSocket routes (`HANDLES_ROUTE`), `fetch('/api/...')` client calls (`CALLS_ROUTE`), WebMCP `navigator.modelContext.registerTool` tools, and Vitest `describe`/`it`/`test` suites (`TESTS_SYMBOL`).
 2. **Python (`python-ast`)**:
    - Single-pass `python3` `ast` batch extractor.
-   - Extracts classes, functions, async functions, methods, `self.<attr>` reads/writes, Pydantic `BaseModel` & `@dataclass` schemas, FastAPI/Flask routes (`@app.get`, `@router.post`), MCP tools (`@server.tool`, `@mcp.tool`), Jinja2 `TemplateResponse`, `os.getenv` / `os.environ.get` (`CONFIGURES_ENV`), embedded SQL table lineage (`scip-sql ddl sql 1.0.0 table:<name>#`), and `pytest` functions/classes (`uv run pytest`).
+   - Extracts classes, top-level and nested functions/async functions (including factory-scoped FastAPI/Flask routes inside `create_app()`), methods, `self.<attr>` reads/writes, Pydantic `BaseModel` & `@dataclass` schemas, FastAPI/Flask routes (`@app.get`, `@router.post`), MCP tools (`@server.tool`, `@mcp.tool`), Jinja2 `TemplateResponse`, `os.getenv` / `os.environ.get` (`CONFIGURES_ENV`), embedded SQL table lineage (`scip-sql ddl sql 1.0.0 table:<name>#`), and `pytest` functions/classes (`uv run pytest`).
 3. **Go & Templ (`go`)**:
    - Extracts Go packages, structs + fields + JSON tags, interfaces, generic functions & receiver methods (`[T any]`), field reads/writes, `http.HandleFunc` / `mux.HandleFunc` + Gin/Echo/Chi (`r.GET`, `r.POST`, etc.) routes, `os.Getenv` / `os.LookupEnv` (`CONFIGURES_ENV`), `*_test.go` `Test*`/`Benchmark*` cases (`go test`), and `.templ` components + HTMX `hx-get`/`hx-post`/`hx-delete` `CALLS_ROUTE` edges.
 4. **Terraform / HCL (`terraform`)**:

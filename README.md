@@ -56,9 +56,20 @@ To install individual skills into your agent's global skills folder:
 cp -R .skills/<skill_name> ~/.gemini/config/skills/<skill_name>
 ```
 
-| Skill / Plugin | Purpose |
+## Catalog
+
+### Plugins
+
+| Plugin | What it does | Use it when |
+| :--- | :--- | :--- |
+| [`ast-graph`](plugins/ast-graph) | Local code & cross-layer dependency graph (`ast_symbol`, `ast_outline`, `ast_refs`, `ast_blast_radius`, `ast_tests_for`, `ast_lineage`). | You want agents to find symbols, trace lineage, and pick targeted tests without grepping or chunk-reading large files. |
+| [`feature-flags`](plugins/feature-flags) | Reference plugin for runtime flags via `hooks.json` (`SessionStart`, `PreInvocation`, `PreToolUse`) backed by workspace/global JSON state. Ships **disabled**. | You're learning how to build hook-driven policy gates (read-only mode, release channels, tool argument rewriting) or need a template for your own. |
+| [`thinking-arcade`](plugins/thinking-arcade) | "Model Invaders" sidecar game (`hooks.json` + `sidecar.json` on `127.0.0.1:4777`). One window plays while any agent conversation is working, pauses when one needs you, and lists those conversations with links back. | You run several long agent sessions at once and want a single place that tells you which one is waiting on you (Antigravity, Claude Code, Codex CLI). |
+
+### Skills
+
+| Skill | Purpose |
 | :--- | :--- |
-| [`ast-graph`](plugins/ast-graph) | Local code & cross-layer dependency graph (`ast_symbol`, `ast_outline`, `ast_refs`, `ast_blast_radius`, `ast_tests_for`, `ast_lineage`). |
 | [`apple_container`](.skills/apple_container) | Replaces Docker with Apple's native container CLI on macOS. |
 | [`gcp_auth`](.skills/gcp_auth) | Google Cloud authentication patterns for Identity Platform, Firebase, and Cloud Run IAM. |
 | [`llm_tutor`](.skills/llm_tutor) | Interactive curriculum-driven technical tutor skill. |

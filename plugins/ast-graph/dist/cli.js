@@ -175,30 +175,42 @@ function teeFullOutput(workspaceRoot, command, text) {
  */
 export function formatCompactCliOutput(command, data, queryArg = '', options = {}) {
     const maxBytes = options.maxBytes ?? INLINE_BYTE_BUDGET;
-    const full = moveSummaryFirst(formatCompactBody(command, data, queryArg, maxBytes));
-    if (byteLen(full) <= maxBytes)
-        return full;
     const rec = (data ?? {});
-    const fullOutputPath = options.tee === false ? undefined : teeFullOutput(rec.workspaceRoot, command, full);
-    return enforceInlineSizeCap(full, maxBytes, { fullOutputPath });
+    const isBatch = Array.isArray(rec.batchItems) || Array.isArray(rec.results) || Array.isArray(rec.outlines);
+    if (isBatch) {
+        const untruncated = formatCompactBody(command, data, queryArg, Number.MAX_SAFE_INTEGER);
+        const fullOutputPath = options.tee === false || byteLen(untruncated) <= maxBytes
+            ? undefined
+            : teeFullOutput(rec.workspaceRoot, command, untruncated);
+        return formatCompactBody(command, data, queryArg, maxBytes, fullOutputPath);
+    }
+    const untruncated = moveSummaryFirst(formatCompactBody(command, data, queryArg, Number.MAX_SAFE_INTEGER));
+    if (byteLen(untruncated) <= maxBytes)
+        return untruncated;
+    const fullOutputPath = options.tee === false ? undefined : teeFullOutput(rec.workspaceRoot, command, untruncated);
+    return enforceInlineSizeCap(untruncated, maxBytes, { fullOutputPath });
 }
-function formatBatch(items, repoPrefix, maxBytes) {
+function formatBatch(items, repoPrefix, maxBytes, fullOutputPath) {
     const header = `${repoPrefix}[AST BATCH] ${items.length} targets`;
-    const perItem = Math.max(700, Math.floor((maxBytes - byteLen(header) - 40) / Math.max(1, items.length)));
+    const perItem = maxBytes >= Number.MAX_SAFE_INTEGER / 2
+        ? Number.MAX_SAFE_INTEGER
+        : Math.max(450, Math.floor((maxBytes - byteLen(header) - 40) / Math.max(1, items.length)));
     const parts = items.map((item, idx) => {
         const rendered = moveSummaryFirst(formatCompactBody(item.command, item.data, item.target, perItem));
-        return enforceInlineSizeCap(`### [${idx + 1}/${items.length}] ${item.target}\n${rendered}`, perItem);
+        return enforceInlineSizeCap(`### [${idx + 1}/${items.length}] ${item.target}\n${rendered}`, perItem, {
+            fullOutputPath,
+        });
     });
     return [header, ...parts].join('\n\n');
 }
-function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_BUDGET) {
+function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_BUDGET, fullOutputPath) {
     const rec = (data ?? {});
     const repoPrefix = typeof rec.workspaceRoot === 'string' && rec.workspaceRoot
         ? `[repo=${path.basename(rec.workspaceRoot)}] `
         : '';
     if (Array.isArray(rec.batchItems)) {
         const items = rec.batchItems;
-        return formatBatch(items.map((item) => ({ command, target: item.target, data: item.result })), repoPrefix, maxBytes);
+        return formatBatch(items.map((item) => ({ command, target: item.target, data: item.result })), repoPrefix, maxBytes, fullOutputPath);
     }
     if (Array.isArray(rec.results)) {
         const items = rec.results;
@@ -206,7 +218,7 @@ function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_
             command,
             target: String(item.query ?? item.target ?? `#${idx + 1}`),
             data: item,
-        })), repoPrefix, maxBytes);
+        })), repoPrefix, maxBytes, fullOutputPath);
     }
     if (Array.isArray(rec.outlines)) {
         const items = rec.outlines;
@@ -214,7 +226,7 @@ function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_
             command: 'outline',
             target: String(item.filePath ?? item.query ?? `#${idx + 1}`),
             data: item,
-        })), repoPrefix, maxBytes);
+        })), repoPrefix, maxBytes, fullOutputPath);
     }
     if (command === 'refs' || command === 'references') {
         const targetLabel = String(rec.target ?? queryArg);
@@ -354,30 +366,49 @@ function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_
         }
     }
     if (command === 'outline') {
-        const filePath = rec.filePath ?? String(rec.query ?? queryArg);
+        const resolvedFilePath = typeof rec.filePath === 'string' && rec.filePath.length > 0 ? rec.filePath : null;
+        const filePath = resolvedFilePath ?? String(rec.query ?? queryArg);
         const symbols = rec.symbols ?? [];
         const candidateFiles = rec.candidateFiles ?? [];
         const totalSymbols = Number(rec.totalSymbolsInFile ?? rec.totalSymbols ?? symbols.length);
         const matchedCount = Number(rec.matchedSymbolsCount ?? symbols.length);
         const lines = [
-            `${repoPrefix}[AST FILE OUTLINE] ${filePath} (${symbols.length} shown of ${matchedCount} matched / ${totalSymbols} total symbols in ${rec.lineCount ?? '?'} lines)`,
+            resolvedFilePath
+                ? `${repoPrefix}[AST FILE OUTLINE] ${filePath} (${symbols.length} shown of ${matchedCount} matched / ${totalSymbols} total symbols in ${rec.lineCount ?? '?'} lines)`
+                : `${repoPrefix}[AST FILE OUTLINE] "${filePath}" (FILE NOT INDEXED — 0 symbols)`,
         ];
         // The file path is printed once in the header; detail lines carry only spans.
         for (const s of symbols) {
             lines.push(`  L${s.startLine}-L${s.endLine} [${s.kind}${s.exported ? ' exp' : ''}] ${s.name} :: ${oneLine(String(s.signature ?? s.name), 80)}`);
         }
-        if (symbols.length === 0 && candidateFiles.length > 0) {
-            lines.push(`  No exact file match for "${filePath}". Closest indexed files: ${candidateFiles.slice(0, 8).join(', ')}`);
+        if (!resolvedFilePath) {
+            if (candidateFiles.length > 0) {
+                lines.push(`  NOT INDEXED: No exact file match for "${filePath}". Closest indexed files: ${candidateFiles.slice(0, 8).join(', ')}`);
+            }
+            else {
+                lines.push(`  NOT INDEXED: "${filePath}" has no symbols in the graph. If the file exists, run ast_sync with paths=["${filePath}"] (or check the workspace), then retry.`);
+            }
         }
-        else if (symbols.length === 0 && totalSymbols === 0) {
-            lines.push(`  NOT INDEXED: "${filePath}" has no symbols in the graph. If the file exists, run ast_sync with paths=["${filePath}"] (or check the workspace), then retry.`);
+        else if (symbols.length === 0 && totalSymbols > 0) {
+            lines.push(`  ${totalSymbols} symbols exist in ${filePath} but none matched the filter/kind; broaden or omit them.`);
         }
         else if (symbols.length === 0) {
-            lines.push(`  ${totalSymbols} symbols exist in this file but none matched the filter/kind; broaden or omit them.`);
+            lines.push(`  NOT INDEXED: "${filePath}" has no symbols in the graph. If the file exists, run ast_sync with paths=["${filePath}"] (or check the workspace), then retry.`);
         }
         const first = symbols[0];
         lines.push('');
         lines.push(SUMMARY_MARKER);
+        if (!resolvedFilePath) {
+            lines.push(`File Outline: "${filePath}" (NOT INDEXED)`);
+            if (candidateFiles.length > 0) {
+                lines.push(`Closest Indexed Files: ${candidateFiles.slice(0, 5).join(', ')}`);
+                lines.push(`Recommended Action: Retry ast_outline with filePath="${candidateFiles[0]}" or run ast_sync if "${filePath}" was recently created`);
+            }
+            else {
+                lines.push(`Recommended Action: Run ast_sync with paths=["${filePath}"]`);
+            }
+            return lines.join('\n');
+        }
         lines.push(`File Outline: ${filePath} (${matchedCount}/${totalSymbols} symbols matched)`);
         if (symbols.length > 0) {
             const keySpans = symbols
@@ -433,13 +464,18 @@ function formatCompactBody(command, data, queryArg = '', maxBytes = INLINE_BYTE_
                 .map((s) => `${s.name} (${s.kind} at ${s.filePath}#L${s.startLine}-L${s.endLine})`)
                 .join(', ')}`);
         }
-        const top = matches[0] ?? (looksLikeLiteral ? undefined : didYouMean[0]);
+        const top = matches[0];
+        const bestSuggestion = !top && !looksLikeLiteral ? didYouMean[0] : undefined;
         lines.push('');
         lines.push(SUMMARY_MARKER);
         lines.push(`Search Query: "${q}" (${matches.length} matches${byFile.size > 1 ? ` across ${byFile.size} files` : ''})`);
         if (top) {
             lines.push(`Top Match: ${top.name} (${top.kind}) at ${top.filePath}#L${top.startLine}-L${top.endLine}`);
             lines.push(`Recommended Action: view_file on ${top.filePath} with StartLine=${top.startLine}, EndLine=${top.endLine}`);
+        }
+        else if (bestSuggestion) {
+            lines.push(`Closest Suggestion: ${bestSuggestion.name} (${bestSuggestion.kind}) at ${bestSuggestion.filePath}#L${bestSuggestion.startLine}-L${bestSuggestion.endLine}`);
+            lines.push(`Recommended Action: Retry with "${bestSuggestion.name}" or view_file on ${bestSuggestion.filePath} with StartLine=${bestSuggestion.startLine}, EndLine=${bestSuggestion.endLine}`);
         }
         else if (looksLikeLiteral) {
             lines.push(`Recommended Action: grep -rn ${JSON.stringify(q)} (literal text is not a symbol)`);

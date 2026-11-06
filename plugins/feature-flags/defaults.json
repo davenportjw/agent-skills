@@ -1,0 +1,31 @@
+{
+  "flags": {
+    "release_channel": {
+      "value": "stable",
+      "type": "enum",
+      "options": ["stable", "beta", "experimental"],
+      "description": "Controls which workflow tier the agent uses (stable conservative workflows vs. experimental multi-agent / preview patterns)."
+    },
+    "read_only_mode": {
+      "value": false,
+      "type": "boolean",
+      "description": "Hard-blocks file mutation tools (write_file, edit_file) in PreToolUse so the agent can only research and audit."
+    },
+    "prod_deploy_guard": {
+      "value": "ask",
+      "type": "enum",
+      "options": ["allow", "ask", "deny"],
+      "description": "Controls PreToolUse behavior when run_command invokes production deployment commands (gcloud run deploy, terraform apply, kubectl apply)."
+    },
+    "prefer_uv_pytest": {
+      "value": true,
+      "type": "boolean",
+      "description": "Automatically rewrites bare 'pytest' commands to 'uv run pytest' via PreToolUse argument overwrite."
+    },
+    "strict_tdd": {
+      "value": false,
+      "type": "boolean",
+      "description": "Injects an ephemeral PreInvocation directive requiring a failing test before implementation changes."
+    }
+  }
+}

@@ -292,10 +292,17 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
         ) {
           manifests.push(rel);
         }
-        if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+        if ((entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) && !entry.name.endsWith('.d.ts')) {
           fileCounts.typescript = (fileCounts.typescript ?? 0) + 1;
-        } else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) {
+          if (entry.name.endsWith('.tsx')) frameworksSet.add('React');
+        } else if (
+          entry.name.endsWith('.js') ||
+          entry.name.endsWith('.jsx') ||
+          entry.name.endsWith('.mjs') ||
+          entry.name.endsWith('.cjs')
+        ) {
           fileCounts.javascript = (fileCounts.javascript ?? 0) + 1;
+          if (entry.name.endsWith('.jsx')) frameworksSet.add('React');
         } else if (entry.name.endsWith('.py')) {
           fileCounts.python = (fileCounts.python ?? 0) + 1;
         } else if (entry.name.endsWith('.go') && !entry.name.endsWith('_templ.go')) {

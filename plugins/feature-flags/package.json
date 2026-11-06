@@ -1,0 +1,10 @@
+{
+  "name": "@agent-skills/feature-flags",
+  "version": "1.0.0",
+  "description": "Reference Antigravity & Claude Code plugin demonstrating runtime feature flags via lifecycle hooks and hierarchical state files.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "npx --prefix ../ast-graph vitest run --root ."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "feature-flags",
+  "displayName": "Feature Flags & Runtime Policy Gate",
+  "version": "1.0.0",
+  "description": "Reference plugin demonstrating runtime feature flags via lifecycle hooks (SessionStart, PreInvocation ephemeral context, and PreToolUse gating/rewriting) backed by hierarchical user and workspace flag files.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "Jason Davenport",
+    "url": "https://github.com/davenportjw"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davenportjw/agent-skills"
+  },
+  "disabled": true,
+  "suggestedPrompts": [
+    "Show my active plugin feature flags and where each flag is inherited from",
+    "Enable read_only_mode for this workspace and test how file edits are gated",
+    "Switch release_channel to experimental and enable strict_tdd for this repo"
+  ]
+}

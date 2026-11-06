@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect x="12" y="12" width="104" height="104" rx="22" fill="#0F172A" stroke="#F59E0B" stroke-width="4"/>
+  <!-- Invader Pixel Art -->
+  <path d="M40 36h8v8h-8v-8zm40 0h8v8h-8v-8zM32 44h64v8H32v-8zm-8 8h80v16H24V52zm8 16h16v8H32v-8zm32 0h32v8H64v-8zM24 76h8v12h-8V76zm72 0h8v12h-8V76zM44 76h8v8h-8v-8zm32 0h8v8h-8v-8z" fill="#10B981"/>
+  <!-- Eyes -->
+  <rect x="44" y="54" width="8" height="8" fill="#0F172A"/>
+  <rect x="76" y="54" width="8" height="8" fill="#0F172A"/>
+  <!-- Laser & Player Ship -->
+  <rect x="62" y="84" width="4" height="12" rx="2" fill="#F59E0B"/>
+  <path d="M52 104l12-8 12 8H52z" fill="#38BDF8"/>
+</svg>

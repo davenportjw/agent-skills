@@ -114,7 +114,12 @@ export class TypeScriptCompilerAdapter {
             norm.endsWith('.min.js')) {
             return false;
         }
-        return norm.endsWith('.ts') || norm.endsWith('.js') || norm.endsWith('.mjs');
+        return (norm.endsWith('.ts') ||
+            norm.endsWith('.tsx') ||
+            norm.endsWith('.js') ||
+            norm.endsWith('.jsx') ||
+            norm.endsWith('.mjs') ||
+            norm.endsWith('.cjs'));
     }
     discoverWorkspacePackages(workspaceRoot) {
         const pkgs = [];
@@ -132,13 +137,19 @@ export class TypeScriptCompilerAdapter {
                 try {
                     const parsed = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
                     const relDir = path.relative(workspaceRoot, absDir).split(path.sep).join('/');
-                    const srcIndex = path.join(absDir, 'src', 'index.ts');
-                    const srcServer = path.join(absDir, 'src', 'server.ts');
-                    const entryRelPath = fs.existsSync(srcIndex)
-                        ? `${relDir}/src/index.ts`
-                        : fs.existsSync(srcServer)
-                            ? `${relDir}/src/server.ts`
-                            : `${relDir}/src/index.ts`;
+                    const entryCandidates = [
+                        'src/index.ts',
+                        'src/index.tsx',
+                        'src/main.tsx',
+                        'src/main.ts',
+                        'src/App.tsx',
+                        'src/server.ts',
+                        'src/app.ts',
+                        'index.ts',
+                        'index.tsx',
+                    ];
+                    const foundEntry = entryCandidates.find((rel) => fs.existsSync(path.join(absDir, rel))) ?? 'src/index.ts';
+                    const entryRelPath = `${relDir}/${foundEntry}`;
                     pkgs.push({
                         name: parsed.name ?? `@warehouse/${entry.name}`,
                         version: parsed.version ?? '0.1.0',
@@ -265,6 +276,7 @@ export class TypeScriptCompilerAdapter {
             moduleResolution: ts.ModuleResolutionKind.NodeNext,
             allowJs: true,
             checkJs: false,
+            jsx: ts.JsxEmit.Preserve,
             strict: true,
             skipLibCheck: true,
             esModuleInterop: true,
@@ -338,6 +350,8 @@ export class TypeScriptCompilerAdapter {
                     const name = node.name.text;
                     const desc = containerName ? `${containerName}#${name}().` : `${name}().`;
                     declToScipId.set(node, makeSymbolScipId(pkg, relPath, desc));
+                    ts.forEachChild(node, (child) => visitDecl(child, name));
+                    return;
                 }
                 else if (ts.isClassDeclaration(node) && node.name) {
                     const className = node.name.text;
@@ -358,6 +372,8 @@ export class TypeScriptCompilerAdapter {
                 else if (ts.isMethodDeclaration(node) && node.name && containerName) {
                     const methodName = node.name.getText(sf);
                     declToScipId.set(node, makeSymbolScipId(pkg, relPath, `${containerName}#${methodName}().`));
+                    ts.forEachChild(node, (child) => visitDecl(child, `${containerName}.${methodName}`));
+                    return;
                 }
                 else if ((ts.isPropertyDeclaration(node) || ts.isPropertySignature(node)) &&
                     node.name &&
@@ -381,7 +397,10 @@ export class TypeScriptCompilerAdapter {
                     registerPropertyScip(propName, propId);
                 }
                 else if (ts.isTypeAliasDeclaration(node) && node.name) {
-                    declToScipId.set(node, makeSymbolScipId(pkg, relPath, `${node.name.text}#`));
+                    const typeName = node.name.text;
+                    declToScipId.set(node, makeSymbolScipId(pkg, relPath, `${typeName}#`));
+                    ts.forEachChild(node, (child) => visitDecl(child, typeName));
+                    return;
                 }
                 else if (ts.isEnumDeclaration(node) && node.name) {
                     declToScipId.set(node, makeSymbolScipId(pkg, relPath, `${node.name.text}#`));
@@ -392,9 +411,15 @@ export class TypeScriptCompilerAdapter {
                     const isZod = isZodInitializerText(initText, varName);
                     const isFuncLike = node.initializer &&
                         (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer));
-                    const desc = isFuncLike ? `${varName}().` : `${varName}.`;
+                    const desc = containerName
+                        ? isFuncLike
+                            ? `${containerName}#${varName}().`
+                            : `${containerName}#${varName}.`
+                        : isFuncLike
+                            ? `${varName}().`
+                            : `${varName}.`;
                     declToScipId.set(node, makeSymbolScipId(pkg, relPath, desc));
-                    if (isZod && node.initializer) {
+                    if ((isZod || isFuncLike) && node.initializer) {
                         ts.forEachChild(node.initializer, (child) => visitDecl(child, varName));
                         return;
                     }
@@ -408,9 +433,26 @@ export class TypeScriptCompilerAdapter {
                 registerFileDeclarations(sf);
             }
         }
-        const resolveTargetDeclarationScip = (sym, _fallbackPropName) => {
+        const resolveTargetDeclarationScip = (sym, fallbackPropName, currentRelPath) => {
+            const fallbackPropertyLookup = (propName, preferredRelPath) => {
+                if (!propName)
+                    return null;
+                const matches = propertyScipByName.get(propName);
+                if (!matches || matches.length === 0)
+                    return null;
+                if (preferredRelPath) {
+                    const sameFileMatch = matches.find((m) => m.includes(`/${preferredRelPath}/`));
+                    if (sameFileMatch)
+                        return sameFileMatch;
+                    const pkg = findPkgForRelPath(preferredRelPath);
+                    const samePkgMatch = matches.find((m) => m.includes(` ${pkg.name} `));
+                    if (samePkgMatch)
+                        return samePkgMatch;
+                }
+                return matches[0] ?? null;
+            };
             if (!sym) {
-                return null;
+                return fallbackPropertyLookup(fallbackPropName, currentRelPath);
             }
             let resolvedSym = sym;
             if (resolvedSym.flags & ts.SymbolFlags.Alias) {
@@ -423,20 +465,18 @@ export class TypeScriptCompilerAdapter {
             }
             const decls = resolvedSym.getDeclarations();
             if (!decls || decls.length === 0) {
-                return null;
+                return fallbackPropertyLookup(fallbackPropName || resolvedSym.getName(), currentRelPath);
             }
             for (const decl of decls) {
                 const direct = declToScipId.get(decl);
                 if (direct)
                     return direct;
-                // If declaration came from a dist/*.d.ts file, map back to canonical source SCIP URI
+                // If declaration came from a dist/*.d.ts file or external module, map back to canonical source SCIP URI
                 const declSf = decl.getSourceFile();
                 const relPath = normalizeDeclFilePath(declSf.fileName);
-                if (!relPath.startsWith('packages/') && !relPath.startsWith('apps/') && !relPath.startsWith('tools/')) {
+                if (!relPath || relPath.startsWith('..') || relPath.includes('node_modules')) {
                     continue;
                 }
-                if (relPath.includes('node_modules'))
-                    continue;
                 const pkg = findPkgForRelPath(relPath);
                 const symName = resolvedSym.getName();
                 if (!symName || symName === '__type' || symName === 'default')
@@ -453,12 +493,12 @@ export class TypeScriptCompilerAdapter {
                     if ((ts.isClassDeclaration(parent) || ts.isInterfaceDeclaration(parent)) && parent.name) {
                         return makeSymbolScipId(pkg, relPath, `${parent.name.text}#${symName}.`);
                     }
-                    const matches = propertyScipByName.get(symName);
-                    if (matches && matches.length > 0) {
-                        const sameFileMatch = matches.find((m) => m.includes(`/${relPath}/`));
-                        if (sameFileMatch)
-                            return sameFileMatch;
+                    if (parent && ts.isTypeLiteralNode(parent) && parent.parent && ts.isTypeAliasDeclaration(parent.parent)) {
+                        return makeSymbolScipId(pkg, relPath, `${parent.parent.name.text}#${symName}.`);
                     }
+                    const matchedProp = fallbackPropertyLookup(symName, relPath);
+                    if (matchedProp)
+                        return matchedProp;
                 }
                 if (ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl) || ts.isTypeAliasDeclaration(decl)) {
                     return makeSymbolScipId(pkg, relPath, `${symName}#`);
@@ -467,7 +507,7 @@ export class TypeScriptCompilerAdapter {
                     return makeSymbolScipId(pkg, relPath, `${symName}.`);
                 }
             }
-            return null;
+            return fallbackPropertyLookup(fallbackPropName || resolvedSym.getName(), currentRelPath);
         };
         const resolveModuleSpecifierToFileScip = (containingFileAbs, moduleSpec) => {
             // Check workspace package match first
@@ -485,9 +525,16 @@ export class TypeScriptCompilerAdapter {
                 const candidates = [
                     rawTarget,
                     rawTarget.replace(/\.js$/, '.ts'),
+                    rawTarget.replace(/\.js$/, '.tsx'),
+                    rawTarget.replace(/\.jsx$/, '.tsx'),
                     rawTarget.replace(/\.mjs$/, '.ts'),
                     `${rawTarget}.ts`,
+                    `${rawTarget}.tsx`,
+                    `${rawTarget}.js`,
+                    `${rawTarget}.jsx`,
                     path.join(rawTarget, 'index.ts'),
+                    path.join(rawTarget, 'index.tsx'),
+                    path.join(rawTarget, 'index.js'),
                 ];
                 for (const cand of candidates) {
                     if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
@@ -519,8 +566,21 @@ export class TypeScriptCompilerAdapter {
             const sha256 = crypto.createHash('sha256').update(content).digest('hex');
             const lineCount = content.split('\n').length;
             const pkg = findPkgForRelPath(relPath);
-            const language = relPath.endsWith('.mjs') || relPath.endsWith('.js') ? 'javascript' : 'typescript';
-            const isTestFile = relPath.endsWith('.test.ts') || relPath.endsWith('.test.js') || relPath.includes('/test/');
+            const language = relPath.endsWith('.mjs') ||
+                relPath.endsWith('.cjs') ||
+                relPath.endsWith('.js') ||
+                relPath.endsWith('.jsx')
+                ? 'javascript'
+                : 'typescript';
+            const isTestFile = relPath.endsWith('.test.ts') ||
+                relPath.endsWith('.test.tsx') ||
+                relPath.endsWith('.spec.ts') ||
+                relPath.endsWith('.spec.tsx') ||
+                relPath.endsWith('.test.js') ||
+                relPath.endsWith('.test.jsx') ||
+                relPath.endsWith('.spec.js') ||
+                relPath.includes('/test/') ||
+                relPath.includes('/__tests__/');
             filesBatch.push({
                 filePath: relPath,
                 packageName: pkg.name,
@@ -644,7 +704,9 @@ export class TypeScriptCompilerAdapter {
                 // 2. Declarations (Function, Class, Interface, Method, Property, TypeAlias, Enum, Variable/ZodSchema)
                 if (ts.isFunctionDeclaration(node) && node.name) {
                     const fnName = node.name.text;
-                    const fnId = declToScipId.get(node) ?? makeSymbolScipId(pkg, relPath, `${fnName}().`);
+                    const enclosing = currentEnclosing();
+                    const containerPrefix = enclosing.kind !== 'File' ? `${enclosing.name}#` : '';
+                    const fnId = declToScipId.get(node) ?? makeSymbolScipId(pkg, relPath, `${containerPrefix}${fnName}().`);
                     const exported = hasExportModifier(node);
                     const sigText = node
                         .getText(sf)
@@ -654,11 +716,12 @@ export class TypeScriptCompilerAdapter {
                         .slice(0, 240) ?? `function ${fnName}()`;
                     const doc = getJSDocComment(node, sf);
                     const comp = computeCyclomaticComplexity(node);
+                    const qualName = enclosing.kind !== 'File' ? `${pkg.name}/${enclosing.name}.${fnName}` : `${pkg.name}/${fnName}`;
                     addNode({
                         id: fnId,
                         kind: 'Function',
                         name: fnName,
-                        qualifiedName: `${pkg.name}/${fnName}`,
+                        qualifiedName: qualName,
                         packageName: pkg.name,
                         filePath: relPath,
                         language,
@@ -674,7 +737,7 @@ export class TypeScriptCompilerAdapter {
                         properties: {},
                     });
                     addEdge({
-                        srcId: currentEnclosing().id,
+                        srcId: enclosing.id,
                         dstId: fnId,
                         kind: 'CONTAINS',
                         filePath: relPath,
@@ -955,6 +1018,10 @@ export class TypeScriptCompilerAdapter {
                             properties: {},
                         });
                     }
+                    symbolStack.push({ id: typeId, kind: 'TypeAlias', name: typeName });
+                    ts.forEachChild(node, visitNode);
+                    symbolStack.pop();
+                    return;
                 }
                 if (ts.isVariableStatement(node)) {
                     const exported = hasExportModifier(node);
@@ -966,23 +1033,32 @@ export class TypeScriptCompilerAdapter {
                             const isZod = isZodInitializerText(initText, varName);
                             const isFunc = decl.initializer &&
                                 (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer));
+                            const enclosing = currentEnclosing();
                             // Only index top-level variables, exported constants, Zod schemas, or function variables
-                            if (exported || isZod || isFunc || currentEnclosing().kind === 'File') {
+                            if (exported || isZod || isFunc || enclosing.kind === 'File') {
+                                const containerPrefix = enclosing.kind !== 'File' ? `${enclosing.name}#` : '';
                                 const varId = declToScipId.get(decl) ??
-                                    makeSymbolScipId(pkg, relPath, isFunc ? `${varName}().` : `${varName}.`);
+                                    makeSymbolScipId(pkg, relPath, isFunc ? `${containerPrefix}${varName}().` : `${containerPrefix}${varName}.`);
                                 const nodeKind = isZod
                                     ? 'ZodSchema'
                                     : isFunc
                                         ? 'Function'
                                         : 'Variable';
-                                const labels = isZod ? ['ZodSchema', 'Variable', 'ProtocolContract'] : [nodeKind];
+                                const labels = isZod
+                                    ? ['ZodSchema', 'Variable', 'ProtocolContract']
+                                    : isFunc
+                                        ? ['Function', 'ArrowFunction', 'Variable']
+                                        : [nodeKind];
                                 const dStart = posToLineCol(decl.getStart(sf));
                                 const dEnd = posToLineCol(decl.getEnd());
+                                const qualName = enclosing.kind !== 'File'
+                                    ? `${pkg.name}/${enclosing.name}.${varName}`
+                                    : `${pkg.name}/${varName}`;
                                 addNode({
                                     id: varId,
                                     kind: nodeKind,
                                     name: varName,
-                                    qualifiedName: `${pkg.name}/${varName}`,
+                                    qualifiedName: qualName,
                                     packageName: pkg.name,
                                     filePath: relPath,
                                     language,
@@ -1000,7 +1076,7 @@ export class TypeScriptCompilerAdapter {
                                     properties: isZod ? { zodSchema: true } : {},
                                 });
                                 addEdge({
-                                    srcId: currentEnclosing().id,
+                                    srcId: enclosing.id,
                                     dstId: varId,
                                     kind: 'CONTAINS',
                                     filePath: relPath,
@@ -1031,8 +1107,11 @@ export class TypeScriptCompilerAdapter {
                                 visitNode(decl.initializer);
                             }
                         }
-                        else if (decl.initializer) {
-                            visitNode(decl.initializer);
+                        else {
+                            visitNode(decl.name);
+                            if (decl.initializer) {
+                                visitNode(decl.initializer);
+                            }
                         }
                     }
                     return;
@@ -1325,6 +1404,19 @@ export class TypeScriptCompilerAdapter {
                         }
                     }
                 }
+                const mutatingMethods = new Set([
+                    'push',
+                    'pop',
+                    'shift',
+                    'unshift',
+                    'splice',
+                    'sort',
+                    'reverse',
+                    'set',
+                    'add',
+                    'delete',
+                    'clear',
+                ]);
                 const isWriteExpr = (expr) => {
                     const parent = expr.parent;
                     if (!parent)
@@ -1343,12 +1435,21 @@ export class TypeScriptCompilerAdapter {
                     if (ts.isDeleteExpression(parent) && parent.expression === expr) {
                         return true;
                     }
+                    if (ts.isPropertyAccessExpression(parent) &&
+                        parent.expression === expr &&
+                        ts.isIdentifier(parent.name) &&
+                        mutatingMethods.has(parent.name.text) &&
+                        parent.parent &&
+                        ts.isCallExpression(parent.parent) &&
+                        parent.parent.expression === parent) {
+                        return true;
+                    }
                     return false;
                 };
                 // 4b. Property read/write tracking (e.g., v.runEndsAt = ..., state.depletedRunVid = ...)
                 if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) {
                     const propSym = checker.getSymbolAtLocation(node.name);
-                    const targetScip = resolveTargetDeclarationScip(propSym, node.name.text);
+                    const targetScip = resolveTargetDeclarationScip(propSym, node.name.text, relPath);
                     if (targetScip) {
                         const enclosing = currentEnclosing();
                         const testCtx = currentTestContext();
@@ -1364,7 +1465,7 @@ export class TypeScriptCompilerAdapter {
                                 weight: edgeKind === 'WRITES_PROPERTY' ? 1 : 0.75,
                                 properties: { property: node.name.text },
                             });
-                            if (testCtx && !targetScip.includes('.test.ts')) {
+                            if (testCtx && !targetScip.includes('.test.')) {
                                 addEdge({
                                     srcId: testCtx.id,
                                     dstId: targetScip,
@@ -1375,6 +1476,62 @@ export class TypeScriptCompilerAdapter {
                                     weight: 1,
                                     properties: {},
                                 });
+                            }
+                        }
+                    }
+                }
+                // 4c. Object literal property writes ({ takes: [...], comments: [...] }) and destructuring reads (const { takes } = state)
+                if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+                    ts.isIdentifier(node.name) &&
+                    !declToScipId.has(node)) {
+                    const enclosing = currentEnclosing();
+                    if (enclosing.kind !== 'File' && enclosing.kind !== 'ZodSchema') {
+                        const propName = node.name.text;
+                        const knownProps = propertyScipByName.get(propName);
+                        if (knownProps && knownProps.length > 0) {
+                            const propSym = checker.getSymbolAtLocation(node.name);
+                            const targetScip = resolveTargetDeclarationScip(propSym, propName, relPath);
+                            if (targetScip && knownProps.includes(targetScip) && targetScip !== enclosing.id) {
+                                addEdge({
+                                    srcId: enclosing.id,
+                                    dstId: targetScip,
+                                    kind: 'WRITES_PROPERTY',
+                                    filePath: relPath,
+                                    line: startPos.line,
+                                    col: startPos.col,
+                                    weight: 0.9,
+                                    properties: { property: propName, via: 'object_literal' },
+                                });
+                            }
+                        }
+                    }
+                }
+                if (ts.isBindingElement(node)) {
+                    const enclosing = currentEnclosing();
+                    if (enclosing.kind !== 'File') {
+                        const propIdent = node.propertyName && ts.isIdentifier(node.propertyName)
+                            ? node.propertyName
+                            : ts.isIdentifier(node.name)
+                                ? node.name
+                                : null;
+                        if (propIdent) {
+                            const propName = propIdent.text;
+                            const knownProps = propertyScipByName.get(propName);
+                            if (knownProps && knownProps.length > 0) {
+                                const propSym = checker.getSymbolAtLocation(propIdent);
+                                const targetScip = resolveTargetDeclarationScip(propSym, propName, relPath);
+                                if (targetScip && knownProps.includes(targetScip) && targetScip !== enclosing.id) {
+                                    addEdge({
+                                        srcId: enclosing.id,
+                                        dstId: targetScip,
+                                        kind: 'READS_PROPERTY',
+                                        filePath: relPath,
+                                        line: startPos.line,
+                                        col: startPos.col,
+                                        weight: 0.75,
+                                        properties: { property: propName, via: 'destructuring' },
+                                    });
+                                }
                             }
                         }
                     }

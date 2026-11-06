@@ -1,0 +1,21 @@
+{
+  "description": "Thinking Arcade (Model Invaders) session-gated Space Invaders sidecar game that unlocks while the agent is thinking or executing tools and pauses when idle.",
+  "display_name": "Thinking Arcade",
+  "command": "node",
+  "args": ["../../scripts/arcade-server.mjs"],
+  "restart_policy": "always",
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "Thinking Arcade",
+    "views": [
+      {
+        "title": "Model Invaders",
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE"
+      }
+    ]
+  },
+  "env": {
+    "THINKING_ARCADE_PORT": "4777"
+  }
+}

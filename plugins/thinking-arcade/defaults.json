@@ -1,0 +1,32 @@
+{
+  "flags": {
+    "display_mode": {
+      "type": "enum",
+      "options": [
+        "window",
+        "auxiliary",
+        "inline",
+        "inline-follow",
+        "both",
+        "off"
+      ],
+      "value": "window",
+      "description": "Controls where Model Invaders mounts: 'window' (default; the hook opens a standalone app window on the first prompt of a conversation, no click and no agent tool calls), 'auxiliary' (click the pill to dock in the Right Auxiliary Pane), 'inline' (inline in chat on turn 1), 'inline-follow' (re-pinned at the bottom of each reply), 'both', or 'off'."
+    },
+    "spawn_ufo_on_tool_use": {
+      "type": "boolean",
+      "value": true,
+      "description": "Spawns a bonus 100-pt Subagent UFO labeled with the active tool name whenever PreToolUse fires."
+    },
+    "keep_alive_on_subagents": {
+      "type": "boolean",
+      "value": false,
+      "description": "When true, keeps the game unlocked when the main turn stops if background tasks or subagents are still running (fullyIdle === false). Defaults to false so the game always stops immediately when the response is done."
+    },
+    "banner_user_markdown": {
+      "type": "boolean",
+      "value": false,
+      "description": "Experimental: when true, the SessionStart banner is sent as systemMessage.metadata.user_markdown so Antigravity renders the \u25b6 Open Model Invaders pill inline and always visible (instead of inside a collapsed 'Hook Json SessionStart' row). Some Antigravity builds drop the entire hook result when metadata is present; turn off if no banner appears."
+    }
+  }
+}

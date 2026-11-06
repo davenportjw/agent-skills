@@ -79,7 +79,6 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["query"];
     };
 }, {
     readonly name: "ast_refs";
@@ -98,6 +97,13 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 };
                 readonly description: "Optional batch array of property/symbol targets to inspect in a single call";
             };
+            readonly queries: {
+                readonly type: "array";
+                readonly items: {
+                    readonly type: "string";
+                };
+                readonly description: "Alias for targets: optional batch array of property/symbol queries";
+            };
             readonly limit: {
                 readonly type: "number";
                 readonly description: "Maximum read/write references to return per category (default: 25)";
@@ -107,7 +113,6 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["target"];
     };
 }, {
     readonly name: "ast_outline";
@@ -147,7 +152,6 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["filePath"];
     };
 }, {
     readonly name: "ast_search";
@@ -158,6 +162,13 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
             readonly query: {
                 readonly type: "string";
                 readonly description: "Symbol search query";
+            };
+            readonly queries: {
+                readonly type: "array";
+                readonly items: {
+                    readonly type: "string";
+                };
+                readonly description: "Optional batch array of symbol search queries to run in a single call";
             };
             readonly kind: {
                 readonly type: "string";
@@ -172,7 +183,6 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["query"];
     };
 }, {
     readonly name: "ast_blast_radius";
@@ -184,6 +194,17 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly type: "string";
                 readonly description: "Symbol name, SCIP URI, or file path";
             };
+            readonly targets: {
+                readonly type: "array";
+                readonly items: {
+                    readonly type: "string";
+                };
+                readonly description: "Optional batch array of symbols or files";
+            };
+            readonly symbolOrFile: {
+                readonly type: "string";
+                readonly description: "Alias for target: symbol name, SCIP URI, or file path";
+            };
             readonly maxHops: {
                 readonly type: "number";
                 readonly description: "Maximum upstream traversal hops (default: 3)";
@@ -193,7 +214,6 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["target"];
     };
 }, {
     readonly name: "ast_tests_for";
@@ -205,12 +225,22 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly type: "string";
                 readonly description: "Symbol name, SCIP URI, or file path";
             };
+            readonly targets: {
+                readonly type: "array";
+                readonly items: {
+                    readonly type: "string";
+                };
+                readonly description: "Optional batch array of symbols or files";
+            };
+            readonly symbolOrFile: {
+                readonly type: "string";
+                readonly description: "Alias for target: symbol name, SCIP URI, or file path";
+            };
             readonly workspace: {
                 readonly type: "string";
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["target"];
     };
 }, {
     readonly name: "ast_lineage";
@@ -222,12 +252,18 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly type: "string";
                 readonly description: "Schema name, route endpoint, SQL table, or Terraform resource";
             };
+            readonly targets: {
+                readonly type: "array";
+                readonly items: {
+                    readonly type: "string";
+                };
+                readonly description: "Optional batch array of lineage targets";
+            };
             readonly workspace: {
                 readonly type: "string";
                 readonly description: "Optional workspace directory path or repository name (e.g., \"/Users/.../electric-sheep\" or \"electric-sheep\"). Auto-resolves to the enclosing git repository and its isolated <repo>/.ast-graph/ast.db.";
             };
         };
-        readonly required: readonly ["target"];
     };
 }, {
     readonly name: "ast_shortest_path";

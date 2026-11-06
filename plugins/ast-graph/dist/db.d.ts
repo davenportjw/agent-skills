@@ -1,4 +1,6 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
+declare const DatabaseSync: typeof DatabaseSyncType;
+type DatabaseSync = DatabaseSyncType;
 import type { BlastRadiusResult, CompilerGraphBatch, FileOutlineResult, LineageResult, ShortestPathResult, SymbolNeighborhood, SymbolReferencesResult, SymbolSummary, TestsForChangeResult } from './types.js';
 export declare class AstGraphDatabase {
     readonly dbPath: string;
@@ -8,7 +10,7 @@ export declare class AstGraphDatabase {
     setMeta(key: string, value: string): void;
     verifyRepoBinding(workspaceRoot: string): void;
     /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
-    static readonly SCHEMA_VERSION = 2;
+    static readonly SCHEMA_VERSION = 3;
     /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
     private static readonly DERIVED_TABLES;
     /** Set when the constructor discarded an outdated/foreign index; callers should run a full sync. */
@@ -90,4 +92,5 @@ export declare class AstGraphDatabase {
         edgesExported: number;
     };
 }
+export {};
 //# sourceMappingURL=db.d.ts.map

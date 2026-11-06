@@ -1,9 +1,14 @@
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AstGraphDatabase } from '../src/db.js';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: typeof DatabaseSyncType;
+};
 
 const tempDirs: string[] = [];
 function tempDb(): string {

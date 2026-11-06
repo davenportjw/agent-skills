@@ -27,9 +27,20 @@ SQL_KEYWORDS = {
     "information_schema", "unnest", "lateral", "only", "stdin", "stdout",
 }
 
+def iter_own_nodes(root_node):
+    """Yield AST nodes belonging to root_node without descending into nested functions or classes."""
+    stack = [root_node]
+    while stack:
+        curr = stack.pop()
+        yield curr
+        for child in ast.iter_child_nodes(curr):
+            if child is not root_node and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            stack.append(child)
+
 def complexity_of(node):
     c = 1
-    for child in ast.walk(node):
+    for child in iter_own_nodes(node):
         if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp, ast.BoolOp)):
             c += 1
     return c
@@ -118,48 +129,59 @@ for f_item in files_input:
         })
 
     router_prefixes = {}
-    for item in tree.body:
-        if isinstance(item, ast.Assign) and isinstance(item.value, ast.Call):
-            func_name, _, kwargs = get_decorator_info(item.value)
+    for sub_node in ast.walk(tree):
+        if isinstance(sub_node, ast.Assign) and isinstance(sub_node.value, ast.Call):
+            func_name, _, kwargs = get_decorator_info(sub_node.value)
             if func_name.endswith("APIRouter") or func_name.endswith("Blueprint"):
                 prefix = kwargs.get("prefix", "")
-                for t in item.targets:
+                for t in sub_node.targets:
                     if isinstance(t, ast.Name):
                         router_prefixes[t.id] = prefix
 
+    def register_function_def(fn_node, parent_container_id, parent_qual_prefix=None):
+        is_tc = test_file and fn_node.name.startswith("test_") and parent_qual_prefix is None
+        kind = "TestCase" if is_tc else "Function"
+        desc = f"{parent_qual_prefix}#{fn_node.name}()." if parent_qual_prefix else f"{fn_node.name}()."
+        fn_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/{desc}"
+        qual_name = f"{pkg_name}/{parent_qual_prefix}.{fn_node.name}" if parent_qual_prefix else f"{pkg_name}/{fn_node.name}"
+        args = [a.arg for a in fn_node.args.args]
+        prefix_kw = "async def" if isinstance(fn_node, ast.AsyncFunctionDef) else "def"
+        sig = f"{prefix_kw} {fn_node.name}({', '.join(args)})"
+        doc = ast.get_docstring(fn_node) or ""
+        labels = [kind, "Python"]
+        if is_tc:
+            labels.append("PytestCase")
+        all_nodes.append({
+            "id": fn_id,
+            "filePath": file_path,
+            "kind": kind,
+            "name": fn_node.name,
+            "qualifiedName": qual_name,
+            "startLine": fn_node.lineno,
+            "endLine": getattr(fn_node, "end_lineno", fn_node.lineno),
+            "signature": sig,
+            "docstring": doc[:300],
+            "complexity": complexity_of(fn_node),
+            "labels": labels,
+        })
+        container_id = suite_id if (is_tc and suite_id) else parent_container_id
+        all_edges.append({
+            "filePath": file_path,
+            "srcId": container_id,
+            "dstId": fn_id,
+            "kind": "CONTAINS",
+            "line": fn_node.lineno,
+        })
+        global_symbols_by_name.setdefault(fn_node.name, []).append(fn_id)
+
+        next_prefix = f"{parent_qual_prefix}.{fn_node.name}" if parent_qual_prefix else fn_node.name
+        for child_stmt in fn_node.body:
+            if isinstance(child_stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                register_function_def(child_stmt, fn_id, next_prefix)
+
+    for item in tree.body:
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            is_tc = test_file and item.name.startswith("test_")
-            kind = "TestCase" if is_tc else "Function"
-            fn_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/{item.name}()."
-            args = [a.arg for a in item.args.args]
-            prefix_kw = "async def" if isinstance(item, ast.AsyncFunctionDef) else "def"
-            sig = f"{prefix_kw} {item.name}({', '.join(args)})"
-            doc = ast.get_docstring(item) or ""
-            labels = [kind, "Python"]
-            if is_tc:
-                labels.append("PytestCase")
-            all_nodes.append({
-                "id": fn_id,
-                "filePath": file_path,
-                "kind": kind,
-                "name": item.name,
-                "qualifiedName": f"{pkg_name}/{item.name}",
-                "startLine": item.lineno,
-                "endLine": getattr(item, "end_lineno", item.lineno),
-                "signature": sig,
-                "docstring": doc[:300],
-                "complexity": complexity_of(item),
-                "labels": labels,
-            })
-            parent_container = suite_id if (is_tc and suite_id) else file_id
-            all_edges.append({
-                "filePath": file_path,
-                "srcId": parent_container,
-                "dstId": fn_id,
-                "kind": "CONTAINS",
-                "line": item.lineno,
-            })
-            global_symbols_by_name.setdefault(item.name, []).append(fn_id)
+            register_function_def(item, file_id, None)
 
         elif isinstance(item, ast.ClassDef):
             base_names = []
@@ -409,11 +431,11 @@ def analyze_callable_body(fn_node, fn_id, file_path, current_cls, is_test_case, 
 
     # Collect call func nodes so we don't double-count method calls as READS_PROPERTY
     call_func_ids = set()
-    for sub in ast.walk(fn_node):
+    for sub in iter_own_nodes(fn_node):
         if isinstance(sub, ast.Call):
             call_func_ids.add(id(sub.func))
 
-    for sub in ast.walk(fn_node):
+    for sub in iter_own_nodes(fn_node):
         line_no = getattr(sub, "lineno", fn_node.lineno)
 
         # Function / Method / Schema calls
@@ -551,15 +573,26 @@ for file_path, source, tree in parsed_trees:
     file_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/"
     test_file = is_test_file(file_path)
     router_prefixes = {}
-    for item in tree.body:
-        if isinstance(item, ast.Assign) and isinstance(item.value, ast.Call):
-            func_name, _, kwargs = get_decorator_info(item.value)
+    for sub_node in ast.walk(tree):
+        if isinstance(sub_node, ast.Assign) and isinstance(sub_node.value, ast.Call):
+            func_name, _, kwargs = get_decorator_info(sub_node.value)
             if func_name.endswith("APIRouter") or func_name.endswith("Blueprint"):
                 prefix = kwargs.get("prefix", "")
-                for t in item.targets:
+                for t in sub_node.targets:
                     if isinstance(t, ast.Name):
                         router_prefixes[t.id] = prefix
 
+    def analyze_function_tree(fn_node, current_cls=None, parent_qual_prefix=None):
+        desc = f"{parent_qual_prefix}#{fn_node.name}()." if parent_qual_prefix else f"{fn_node.name}()."
+        fn_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/{desc}"
+        is_tc = test_file and fn_node.name.startswith("test_") and (parent_qual_prefix is None or parent_qual_prefix == current_cls)
+        analyze_callable_body(fn_node, fn_id, file_path, current_cls, is_tc, router_prefixes)
+        next_prefix = f"{parent_qual_prefix}.{fn_node.name}" if parent_qual_prefix else fn_node.name
+        for child_stmt in fn_node.body:
+            if isinstance(child_stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                analyze_function_tree(child_stmt, current_cls, next_prefix)
+
+    for item in tree.body:
         if isinstance(item, ast.Import):
             for alias in item.names:
                 mod_id = f"scip-py uv {alias.name} 0.1.0 module/"
@@ -579,15 +612,11 @@ for file_path, source, tree in parsed_trees:
                             "line": item.lineno,
                         })
         elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            fn_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/{item.name}()."
-            is_tc = test_file and item.name.startswith("test_")
-            analyze_callable_body(item, fn_id, file_path, None, is_tc, router_prefixes)
+            analyze_function_tree(item, None, None)
         elif isinstance(item, ast.ClassDef):
             for member in item.body:
                 if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    m_id = f"scip-py uv {pkg_name} 0.1.0 {file_path}/{item.name}#{member.name}()."
-                    is_tc = test_file and member.name.startswith("test_")
-                    analyze_callable_body(member, m_id, file_path, item.name, is_tc, router_prefixes)
+                    analyze_function_tree(member, item.name, item.name)
 
 print(json.dumps({
     "nodes": all_nodes,

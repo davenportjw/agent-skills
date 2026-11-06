@@ -189,6 +189,7 @@ export interface EdgeSummary {
 }
 
 export interface SymbolNeighborhood {
+  query?: string;
   symbol: SymbolSummary | null;
   matches: SymbolSummary[];
   callers: EdgeSummary[];
