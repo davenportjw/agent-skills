@@ -13,6 +13,7 @@ This repository includes the following curated skills and plugins:
 * **[ast-graph-traceability](skills/ast-graph-traceability.md)** (deprecated): Retired fork; use `ast-graph` below.
 * **[apple_container](skills/apple_container.md)**: Replaces Docker with Apple's native container CLI for local development, orchestration, and Kubernetes.
 * **[ast-graph](skills/ast_graph.md)**: Multi-repo, tamper-proof AST & Cross-Layer Lineage GraphDB plugin (`.ast-graph/ast.db`, SCIP + SQLite LPG) across TypeScript/JS, Python, Go/Templ, Terraform, and SQL.
+* **[adaptive-learning](skills/adaptive_learning.md)**: Interactive mastery-based learning journeys that embed `<agent-embed>` micro-widgets, `diff` blocks, and Mermaid diagrams directly inside `ask_question` with closed-loop callback remediation.
 * **[gcp_auth](skills/gcp_auth.md)**: Implement and debug Google Cloud Authentication using Identity Platform, Firebase, and Cloud Run IAM.
 * **[llm_tutor](skills/llm_tutor.md)**: A generic tutor skill that reads a curriculum YAML schema, adapts to user personas, and interactively guides learners.
 * **[session-journal](skills/session-journal.md)**: Automatically logs, tracks, and summarizes active coding sessions and discussions inside your workspace.

@@ -47,6 +47,7 @@ nav:
     - AST GraphDB Plugin: skills/ast_graph.md
     - Feature Flags Plugin: skills/feature_flags.md
     - Thinking Arcade Plugin: skills/thinking_arcade.md
+    - Adaptive Learning Plugin: skills/adaptive_learning.md
     - GCP Auth: skills/gcp_auth.md
     - LLM Tutor: skills/llm_tutor.md
     - Session Journal: skills/session-journal.md

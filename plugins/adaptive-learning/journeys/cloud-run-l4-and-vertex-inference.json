@@ -1,0 +1,98 @@
+{
+  "journeyId": "cloud-run-l4-and-vertex-inference",
+  "title": "Journey 3: Cloud Run L4 GPU & Vertex AI Inference Architecture",
+  "description": "Master the TTFT/cost crossover between Gemma 4 on Cloud Run L4 GPUs and Vertex AI Gemini 3.8 Flash, continuous batching concurrency in Terraform, and automated post-evaluation GCS/BigQuery resource teardown.",
+  "nodes": [
+    {
+      "nodeId": "l4-vs-cpu-and-cold-start",
+      "title": "Node 1: Warm L4 GPU VRAM vs. Scale-to-Zero Cold Starts & CPU Memory Bandwidth",
+      "objective": "Understand why open-weight Gemma 4 inference requires dedicated L4 GPU memory bandwidth with min_instance_count >= 1 for interactive latency, and when serverless Vertex AI Gemini 3.8 Flash is more cost-effective.",
+      "primaryModality": {
+        "type": "agent-embed",
+        "widgetFile": "l4_vs_vertex_cost_micro_widget.html",
+        "questionPrompt": "### Node 1: Cloud Run L4 GPU vs. CPU & Vertex AI Crossover\nDrag the **Daily Requests** and **Min Warm Instances** sliders below to inspect the impact on Time-To-First-Token (TTFT) and daily cost:\n\n{{WIDGET_EMBED}}\n\nYou are deploying a **Gemma 4** microservice on Cloud Run (`nvidia-l4`, 24 GB VRAM) for an interactive agent studio requiring **<250ms p95 TTFT** under sustained traffic (80k requests/day). What happens if you set `min_instance_count = 0` or drop the GPU to run on CPU-only Cloud Run instances?",
+        "options": [
+          "Option A — Setting `min_instance_count = 0` triggers multi-gigabyte model weight loading into GPU VRAM on idle wakeups (~14s+ cold-start spike), while CPU-only instances lack the memory bandwidth for autoregressive decoding (~4,200ms+ TTFT); keeping `min_instance_count = 1` with `cpu_idle = false` preserves warm VRAM at ~185ms TTFT.",
+          "Option B — Cloud Run automatically snapshots GPU VRAM across scale-to-zero transitions with zero cold-start latency, and CPU-only instances match L4 token throughput as long as vCPU count is set to 8.",
+          "Option C — Running Gemma 4 weights directly on the developer's local Apple Silicon MacBook via unrolled Python loops is the recommended production fallback when Cloud Run scales to zero."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "gpu_scale_to_zero_and_cpu_bandwidth_myth",
+            "diagnosis": "Autoregressive LLM decoding is memory-bandwidth bound: an NVIDIA L4 GPU provides ~300 GB/s of VRAM bandwidth, whereas standard Cloud Run CPU memory bandwidth bottlenecks token generation to >4 seconds TTFT. Furthermore, scaling a GPU container to zero (`min_instance_count = 0`) evicts model weights from VRAM, causing a 10–15+ second cold start on the next request."
+          },
+          "2": {
+            "misconceptionId": "local_apple_silicon_oom_hazard",
+            "diagnosis": "Heavy weight loading or unrolled autoregressive loops on a local Apple Silicon host risk triggering macOS kernel memory watchdog panics. Production and heavy evaluation workloads belong on Cloud Run L4 GPUs or Vertex AI."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "diff-and-mermaid",
+        "questionPrompt": "### Node 1 (Remediation View): Terraform Diff & Cold-Start Sequence\nLet's switch from the simulator to the exact **Terraform configuration diff (`cloud_run_l4_service.tf`)** and request latency trace:\n\n```diff\n@@ -14,10 +14,11 @@ resource \"google_cloud_run_v2_service\" \"gemma4_l4\" {\n   template {\n-    max_instance_request_concurrency = 1\n+    max_instance_request_concurrency = 32\n     scaling {\n-      min_instance_count = 0\n+      min_instance_count = 1\n       max_instance_count = 4\n     }\n     containers {\n       resources {\n         limits = { cpu = \"8\", memory = \"32Gi\", \"nvidia.com/gpu\" = \"1\" }\n-        cpu_idle = true\n+        cpu_idle = false\n       }\n     }\n```\n\n```mermaid\nsequenceDiagram\n    participant Client as Agent Studio\n    participant Cold as L4 (min_instance=0)\n    participant Warm as L4 (min_instance=1, concurrency=32)\n    Client->>Cold: POST /v1/chat/completions\n    Note over Cold: Pull container + load 16GB weights into VRAM (~14.8s)\n    Cold-->>Client: First token after 14,800ms\n    Client->>Warm: POST /v1/chat/completions\n    Note over Warm: Weights already resident in L4 VRAM + PagedAttention\n    Warm-->>Client: First token after 185ms\n```\n\nLooking at the Terraform diff and sequence trace above, why must `min_instance_count = 1`, `cpu_idle = false`, and `max_instance_request_concurrency = 32` be configured together on the Cloud Run L4 service?",
+        "options": [
+          "Option A — `min_instance_count = 1` and `cpu_idle = false` keep the Gemma 4 weights resident in L4 VRAM with active background health/scheduler threads, while `max_instance_request_concurrency = 32` allows vLLM continuous batching to serve 32 concurrent streams on a single GPU instead of spinning up 32 separate GPUs.",
+          "Option B — Setting `max_instance_request_concurrency = 1` is required because an NVIDIA L4 GPU can only hold one HTTP connection in VRAM at a time.",
+          "Option C — `cpu_idle = true` throttles the CPU between tokens to make GPU matrix multiplication run faster."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "concurrency_one_gpu_exhaustion",
+            "diagnosis": "If `max_instance_request_concurrency = 1`, 32 concurrent requests would force Cloud Run to attempt provisioning 32 separate L4 GPU instances (exhausting regional GPU quota). vLLM continuous batching shares a single L4 GPU across 32 concurrent requests."
+          },
+          "2": {
+            "misconceptionId": "cpu_idle_throttling_error",
+            "diagnosis": "Cloud Run GPU containers require `cpu_idle = false` (always-allocated CPU) so the inference server's async event loop and CUDA kernel scheduler are never throttled."
+          }
+        }
+      }
+    },
+    {
+      "nodeId": "eval-harness-lifecycle-teardown",
+      "title": "Node 2: Automated Resource Lifecycle & Post-Evaluation Teardown",
+      "objective": "Ensure every cloud benchmark or evaluation harness uses Application Default Credentials (ADC) and guarantees post-run teardown of temporary GCS staging objects and BigQuery tables inside a try/finally block.",
+      "primaryModality": {
+        "type": "code-comparison",
+        "questionPrompt": "### Node 2: Cloud Benchmark Resource Lifecycle & Auth Hygiene\nCompare these two Python benchmark harnesses that evaluate Gemma 4 latency and stage telemetry to Cloud Storage (`gs://davenport-boutique-vertex-staging/`) and BigQuery (`davenport-boutique`):",
+        "options": [
+          "Option A — ADC Auth + Guaranteed `try / finally` Resource Teardown:\n```python\ndef run_ephemeral_l4_eval(run_id: str, client: Any) -> dict[str, Any]:\n    gcs_prefix = f\"gs://davenport-boutique-vertex-staging/eval-{run_id}\"\n    bq_table = f\"davenport-boutique.eval_scratch.l4_metrics_{run_id}\"\n    try:\n        client.stage_prompts(gcs_prefix)\n        return client.execute_benchmark(gcs_prefix, bq_table)\n    finally:\n        # Always clean up ephemeral cloud artifacts even if the benchmark raises!\n        client.delete_gcs_prefix(gcs_prefix)\n        client.drop_bigquery_table(bq_table)\n```",
+          "Option B — Hardcoded API Key + Teardown Only on Happy Path:\n```python\ndef run_ephemeral_l4_eval(run_id: str, client: Any) -> dict[str, Any]:\n    api_key = os.environ[\"GEMINI_API_KEY\"]  # Fails under ADC-only project policy\n    gcs_prefix = f\"gs://davenport-boutique-vertex-staging/eval-{run_id}\"\n    bq_table = f\"davenport-boutique.eval_scratch.l4_metrics_{run_id}\"\n    result = client.execute_benchmark(gcs_prefix, bq_table, api_key=api_key)\n    client.delete_gcs_prefix(gcs_prefix)\n    return result\n```",
+          "Option C — Silent Mock Fallback on Cloud Error:\n```python\ndef run_ephemeral_l4_eval(run_id: str, client: Any) -> dict[str, Any]:\n    try:\n        return client.execute_benchmark(run_id)\n    except Exception:\n        return {\"ttft_ms\": 180, \"status\": \"simulated_success\"}\n```"
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "orphaned_resources_and_api_key_violation",
+            "diagnosis": "Option B violates two core engineering rules: it checks for `GEMINI_API_KEY` instead of using Google Cloud Application Default Credentials (ADC), and because cleanup is outside a `finally` block, any benchmark exception leaves orphaned GCS objects and BigQuery scratch tables accumulating storage charges."
+          },
+          "2": {
+            "misconceptionId": "silent_mock_fallback_violation",
+            "diagnosis": "Option C violates the Strict Never Mock Directive: catching a real service error and returning synthetic benchmark metrics (`simulated_success`) hides broken infrastructure and corrupts evaluation results."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "diff-and-mermaid",
+        "questionPrompt": "### Node 2 (Remediation View): Exception-Safe Teardown Diff\nExamine why placing cloud cleanup calls inside a `finally:` block is mandatory for any evaluation harness:\n\n```diff\n@@ -8,6 +8,8 @@ def run_ephemeral_l4_eval(run_id: str, client: Any) -> dict[str, Any]:\n-    client.stage_prompts(gcs_prefix)\n-    result = client.execute_benchmark(gcs_prefix, bq_table)\n-    client.delete_gcs_prefix(gcs_prefix)\n-    client.drop_bigquery_table(bq_table)\n-    return result\n+    try:\n+        client.stage_prompts(gcs_prefix)\n+        return client.execute_benchmark(gcs_prefix, bq_table)\n+    finally:\n+        client.delete_gcs_prefix(gcs_prefix)\n+        client.drop_bigquery_table(bq_table)\n```\n\nIf `client.execute_benchmark()` raises a `TimeoutError` halfway through the run, what is the difference between the `-` (before) code and the `+` (after) code?",
+        "options": [
+          "Option A — In the `+` (after) code, Python executes the `finally:` block before propagating the `TimeoutError`, guaranteeing that both `delete_gcs_prefix` and `drop_bigquery_table` run and zero orphaned cloud resources remain.",
+          "Option B — The `finally:` block swallows the `TimeoutError` and returns `None` so the test appears to pass.",
+          "Option C — The `finally:` block only runs when `execute_benchmark()` succeeds without throwing an exception."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "finally_swallows_exception_myth",
+            "diagnosis": "A `try / finally` block in Python does NOT swallow exceptions (unless `finally` itself executes a `return` or `break`). It runs the cleanup actions and then re-raises the original `TimeoutError`."
+          },
+          "2": {
+            "misconceptionId": "finally_only_on_success_myth",
+            "diagnosis": "In Python, `finally:` always executes whether the `try:` block returns normally or raises an exception."
+          }
+        }
+      }
+    }
+  ]
+}

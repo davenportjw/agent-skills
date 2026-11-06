@@ -1,0 +1,78 @@
+{
+  "journeyId": "token-economics-and-ast-graph",
+  "title": "Journey 2: Multi-Agent Token Economics & AST-Graph Traceability",
+  "description": "Master when to keep AST-Graph lookups direct in a Frontier Root session vs. delegating to subagents, and how Context-Zero Orthogonal Validation prevents confirmation bias.",
+  "nodes": [
+    {
+      "nodeId": "cold_start_tax_vs_ast_direct",
+      "title": "1. The ~8k–15k Subagent Cold-Start Tax vs. Direct AST Span Resolution",
+      "objective": "Calculate when direct AST-Graph lookups beat subagent delegation and naive 800-line file chunking.",
+      "primaryModality": {
+        "type": "embed_simulator_in_question",
+        "widgetFile": "token_crossover_micro_widget.html",
+        "questionPrompt": "### Checkpoint 2.1: Subagent Cold-Start Tax vs. AST-Direct\nUse the interactive Token Crossover slider below to test **2 files** with **low log entropy (4 KB)** vs. **88 KB of noisy Playwright/build logs**:\n\n{{WIDGET_EMBED}}\n\nYou are running on a Frontier root model (**Gemini 4 Argon** or **Claude Opus 5.5**) and need to locate a symbol definition, trace 2 callers, and edit **2 files** (with no noisy log dumps). What is the optimal execution strategy and why?",
+        "options": [
+          "Option A: Keep execution **direct in the root session** using `ast_symbol` and `ast_refs` exact line-span reads:\n```python\n# Avoids the ~11.5k token subagent cold-start tax & handoff loss\n# Reads only pipeline.py#L142-L184 (~980 tokens total)\n```",
+          "Option B: Spawn a subagent with `Model: \"pro\"` to grep the codebase and summarize the 2 files.",
+          "Option C: Call `read_file` in 800-line chunks (`L1-800`, `L801-1600`) across both files in the root session."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "spawned_subagent_for_small_edit_and_used_pro",
+            "diagnosis": "Two traps here! First, spawning a subagent for a bounded 2-file edit pays an immediate **~8k–15k token cold-start tax** (system prompt + tool schemas) for a task that only costs ~2.7k tokens directly via `ast_symbol`. Second, passing `Model: \"pro\"` from a Frontier root routes to a legacy preview endpoint that 404s (always use `Model: \"inherit\"` or `\"flash\"`)."
+          },
+          "2": {
+            "misconceptionId": "chunk_read_large_files",
+            "diagnosis": "Paging through files in 800-line chunks pollutes the root context window with ~22k+ tokens of irrelevant code when `ast_symbol` returns the exact `#L142-L184` span in 12ms."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "diff_and_mermaid_in_question",
+        "questionPrompt": "### Remediation 2.1 (Alternative View: Token Accounting Breakdown)\nCompare the exact token footprint of all three strategies for a 2-file edit vs. an 88 KB log dump:\n\n```diff\n--- Strategy_Subagent_On_2_Files (Wastes 11.5k Cold-Start Tax)\n+++ Strategy_AST_Direct_On_2_Files (Optimal for 1-4 files, low noise)\n- Subagent System Prompt + Tool Schemas:  11,500 tokens\n- Handoff Prompt + Summary Synthesis:      1,800 tokens\n+ ast_symbol + Exact Span Read (#L142-184): 2,700 tokens (Save 10,600 tokens!)\n```\n\n| Workload | Root Direct + AST | Subagent (`flash` / `inherit`) | Winner |\n| :--- | :--- | :--- | :--- |\n| **1–4 Files, Low Noise (<10 KB)** | **~2.7k–5.4k tok** | ~13k–17k tok (incl. cold-start tax) | **Root Direct + AST** |\n| **High-Entropy Logs / DOM (90 KB)** | ~28k tok (Pollutes Root!) | **~1.8k tok in Root** (25k quarantined in Flash) | **Quarantine in Flash Subagent** |\n\nNow consider the opposite scenario: a test run fails and produces a **95 KB Playwright DOM + stack trace log**. How should a Frontier root agent handle inspecting that log?",
+        "options": [
+          "Option A: Delegate log forensics to a `gemini-3.8-flash` subagent so the 95 KB (~26k tokens) of high-entropy noise is quarantined out of the root context window, returning only the compact root-cause summary.",
+          "Option B: Read the entire 95 KB log directly into the Frontier root context window in 800-line chunks.",
+          "Option C: Ignore the test failure and skip verification."
+        ],
+        "correctIndex": 0
+      }
+    },
+    {
+      "nodeId": "context_zero_orthogonal_validation",
+      "title": "2. Context-Zero Orthogonal Cross-Model Validation",
+      "objective": "Understand why auditors must not inherit author chain-of-thought (Context-Zero) and why lower-tier models must never semantically critique frontier diffs.",
+      "primaryModality": {
+        "type": "code_and_mermaid_in_question",
+        "questionPrompt": "### Checkpoint 2.2: Context-Zero Orthogonal Audit\nInspect the cross-model verification flow below:\n\n```mermaid\nflowchart LR\n  Auth[\"Author (Gemini 4 Argon)\"] -->|\"Quarantine Author CoT!\"| X[\"✗ Dropped\"]\n  Prompt[\"User Prompt + RATERS.md + git diff + ast_blast_radius\"] --> Aud[\"Orthogonal Auditor (Opus 5.5 / Inherit)\"]\n```\n\nWhy must a Context-Zero validation subagent inspect **only** the User Prompt, `RATERS.md`/`AGENTS.md`, `git diff`, and `ast_blast_radius`—**without** receiving the Author agent's chain-of-thought or conversation transcript?",
+        "options": [
+          "Option A: Passing the author's reasoning trace primes the auditor with confirmation bias (sycophancy), causing it to rationalize the same blind spots and miss subtle invariant violations.",
+          "Option B: `git diff` cannot be run if a conversation transcript exists.",
+          "Option C: Lower-tier Flash models require empty prompts to Critique Frontier models."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "thought_git_diff_conflicts_with_transcript",
+            "diagnosis": "`git diff` is a filesystem/VCS operation; the issue is cognitive/attentional: when an LLM reads a persuasive chain-of-thought explaining *why* a shortcut was taken, its defect-detection rate drops from ~93% to ~41%."
+          },
+          "2": {
+            "misconceptionId": "used_flash_to_critique_frontier",
+            "diagnosis": "Never use a lower-tier model (`flash`) to semantically critique a Frontier model (`gemini-4-argon` or `claude-opus-5.5`)—always use a peer Frontier tier (`Model: \"inherit\"`) with Context-Zero isolation."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "diff_in_question",
+        "questionPrompt": "### Remediation 2.2 (Side-by-Side Diff: Biased vs. Context-Zero Subagent Invocation)\nCompare the flawed auditor invocation (which leaks author rationalizations and downgrades the model tier) against the valid Context-Zero invocation:\n\n```diff\n--- Flawed_Auditor_Call (Biased + Down-Tier Anti-Pattern)\n+++ Valid_Context_Zero_Auditor_Call (Orthogonal + Clean Input)\n invoke_subagent(\n   Role=\"Orthogonal Diff Auditor\",\n-  Model=\"flash\",\n-  Prompt=f\"Here is my reasoning why I skipped the teardown check: {author_cot}. Looks good right?\"\n+  Model=\"inherit\",\n+  Prompt=\"Audit uncommitted `git diff` and `ast_blast_radius` against User Prompt and AGENTS.md invariants.\"\n )\n```\n\nWhen invoking an orthogonal validator from a **Gemini 4 Argon** root session in Antigravity, which `Model` argument and input payload should you pass?",
+        "options": [
+          "Option A: Pass `Model: \"inherit\"` and provide only the User Prompt, project invariants (`AGENTS.md`/`RATERS.md`), `git diff`, and `ast_blast_radius`.",
+          "Option B: Pass `Model: \"pro\"` and attach the full author chain-of-thought.",
+          "Option C: Pass `Model: \"flash_lite\"` so it runs faster."
+        ],
+        "correctIndex": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>True Generated A2UI Compiler &amp; MCP App Runtime</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-3">
+  <div class="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-3">
+    <!-- Header & Strictly Ordered Tabs -->
+    <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[var(--border)]">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+          <h2 class="text-[var(--foreground)] font-semibold text-base leading-tight">
+            True Generative UI Runtime: Dynamic A2UI Compiler vs. MCP App
+          </h2>
+        </div>
+        <p class="text-[var(--muted-foreground)] text-xs mt-0.5">
+          Zero hardcoded controls—the UI on the left is compiled dynamically from the <code class="font-mono">updateComponents</code> JSON stream
+        </p>
+      </div>
+
+      <div class="flex items-center gap-1 bg-[var(--secondary)] p-1 rounded-lg border border-[var(--border)]">
+        <button onclick="switchTab(1)" id="btn-tab-1" class="px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] transition-all">
+          Tab 1: A2UI Dynamic Compiler
+        </button>
+        <button onclick="switchTab(2)" id="btn-tab-2" class="px-2.5 py-1 rounded-md text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all">
+          Tab 2: MCP App (ui:// + postMessage)
+        </button>
+      </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- TAB 1: TRUE A2UI DYNAMIC COMPONENT COMPILER + DATAMODEL            -->
+    <!-- ================================================================== -->
+    <div id="panel-tab-1" class="space-y-2.5">
+      <!-- Agent Stream Morph Buttons: proves the UI is generated from JSONL -->
+      <div class="flex flex-wrap items-center justify-between gap-1.5 bg-[var(--secondary)]/50 px-3 py-1.5 rounded-lg border border-[var(--border)]">
+        <span class="text-xs font-medium text-[var(--muted-foreground)]">
+          Stream Agent <code class="font-mono">updateComponents</code> Blueprint:
+        </span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button onclick="streamA2UIBlueprint('canary')" id="bp-canary" class="px-2 py-0.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)]">
+            1. Basic Canary Slider (3 nodes)
+          </button>
+          <button onclick="streamA2UIBlueprint('guardrails')" id="bp-guardrails" class="px-2 py-0.5 rounded text-xs font-medium bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)]">
+            2. + Region &amp; Auto-Rollback Toggle (5 nodes)
+          </button>
+          <button onclick="streamA2UIBlueprint('incident')" id="bp-incident" class="px-2 py-0.5 rounded text-xs font-medium bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)]">
+            3. Emergency Drain &amp; Pager UI (4 nodes)
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-3 items-stretch">
+        <!-- Col 1 (4 cols): EMPTY CONTAINER — 100% Compiled from A2UI JSONL -->
+        <div class="col-span-4 bg-[var(--secondary)]/40 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between border-b border-[var(--border)] pb-1">
+            <span class="text-xs font-semibold">Compiled A2UI Surface</span>
+            <span id="a2ui-node-count" class="px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-500/15 text-emerald-500">
+              4 nodes
+            </span>
+          </div>
+
+          <!-- Empty mount root: populated solely by compileA2UITree() -->
+          <div id="a2ui-dynamic-mount" class="space-y-2"></div>
+
+          <div class="text-xs font-mono text-[var(--muted-foreground)] truncate" id="a2ui-last-event">
+            Compiled from rootComponentId: "rollout-card"
+          </div>
+        </div>
+
+        <!-- Col 2 (4 cols): Live Reactive DataModel Store -->
+        <div class="col-span-4 bg-[var(--secondary)]/50 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between border-b border-[var(--border)] pb-1">
+            <span class="text-xs font-semibold">Bound <code class="font-mono">DataModel</code> Store</span>
+            <span id="a2ui-mut-badge" class="px-1.5 py-0.5 rounded text-xs font-mono bg-[var(--card)] border border-[var(--border)]">
+              0 edits
+            </span>
+          </div>
+
+          <div id="a2ui-datamodel-table" class="space-y-1 font-mono text-xs overflow-y-auto max-h-48"></div>
+
+          <div class="text-xs text-[var(--muted-foreground)] border-t border-[var(--border)] pt-1">
+            Every generated control binds via <code class="font-mono">{"path": "/..."}</code>
+          </div>
+        </div>
+
+        <!-- Col 3 (4 cols): Live Editable A2UI JSONL Wire Blueprint -->
+        <div class="col-span-4 bg-[var(--secondary)]/60 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold font-mono text-sky-500" id="a2ui-wire-title">
+              updateComponents JSON
+            </span>
+            <button onclick="applyCustomJsonEdit()" class="px-2 py-0.5 rounded text-xs font-mono font-semibold bg-emerald-500/20 text-emerald-500 border border-emerald-500/40 hover:bg-emerald-500/30">
+              Re-Compile JSON → UI
+            </button>
+          </div>
+
+          <textarea
+            id="a2ui-json-editor"
+            spellcheck="false"
+            class="w-full h-44 font-mono text-xs leading-snug bg-[var(--card)] p-2 rounded border border-[var(--border)] text-[var(--foreground)] focus:outline-none focus:border-emerald-500"
+          ></textarea>
+
+          <div class="text-xs text-[var(--muted-foreground)] truncate" id="a2ui-wire-status">
+            Edit a label or add a component above &amp; click Re-Compile!
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- TAB 2: MCP APP (ui:// RESOURCE MOUNT + JSON-RPC postMessage)       -->
+    <!-- ================================================================== -->
+    <div id="panel-tab-2" class="hidden space-y-2.5">
+      <div class="grid grid-cols-12 gap-3 items-stretch">
+        <!-- Col 1 (4 cols): Mounted ui:// Resource HTML Container -->
+        <div class="col-span-4 bg-[var(--secondary)]/40 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between border-b border-[var(--border)] pb-1">
+            <span class="text-xs font-semibold font-mono text-emerald-500">ui://canary-studio/widget</span>
+            <span class="px-1.5 py-0.5 rounded text-xs font-mono bg-[var(--card)] border border-[var(--border)]">
+              MCP Resource
+            </span>
+          </div>
+
+          <!-- Dynamically mounted from mcp_ui_server.py resource template -->
+          <div id="mcp-resource-mount" class="space-y-2"></div>
+
+          <div class="text-xs font-mono text-[var(--muted-foreground)] truncate" id="mcp-last-event">
+            Mounted via _meta.ui.resourceUri
+          </div>
+        </div>
+
+        <!-- Col 2 (4 cols): MCP Server structuredContent DataModel -->
+        <div class="col-span-4 bg-[var(--secondary)]/50 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between border-b border-[var(--border)] pb-1">
+            <span class="text-xs font-semibold">MCP <code class="font-mono">structuredContent</code></span>
+            <span id="mcp-mut-badge" class="px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-500/15 text-emerald-500">
+              Synced
+            </span>
+          </div>
+
+          <div id="mcp-datamodel-table" class="space-y-1 font-mono text-xs"></div>
+
+          <div class="text-xs text-[var(--muted-foreground)] border-t border-[var(--border)] pt-1">
+            Mutated via JSON-RPC <code class="font-mono">tools/call</code> &amp; <code class="font-mono">ui/message</code>
+          </div>
+        </div>
+
+        <!-- Col 3 (4 cols): Live JSON-RPC 2.0 postMessage Wire Log -->
+        <div class="col-span-4 bg-[var(--secondary)]/60 border border-[var(--border)] rounded-lg p-3 flex flex-col justify-between space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold font-mono text-amber-500">
+              postMessage JSON-RPC 2.0 Log
+            </span>
+            <span id="mcp-rpc-badge" class="px-1.5 py-0.5 rounded text-xs font-mono bg-[var(--card)] border border-[var(--border)]">
+              id: #100
+            </span>
+          </div>
+
+          <pre id="mcp-wire-log" class="h-44 overflow-y-auto font-mono text-xs leading-snug bg-[var(--card)] p-2 rounded border border-[var(--border)] text-[var(--foreground)]"></pre>
+
+          <div class="text-xs text-[var(--muted-foreground)] truncate">
+            Real <code class="font-mono">window.postMessage</code> listener active.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // TAB SWITCHER (Strict 1 = A2UI, 2 = MCP App)
+    // =========================================================================
+    function switchTab(tabNum) {
+      const p1 = document.getElementById('panel-tab-1');
+      const p2 = document.getElementById('panel-tab-2');
+      const b1 = document.getElementById('btn-tab-1');
+      const b2 = document.getElementById('btn-tab-2');
+
+      if (tabNum === 1) {
+        p1.classList.remove('hidden');
+        p2.classList.add('hidden');
+        b1.className = 'px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] transition-all';
+        b2.className = 'px-2.5 py-1 rounded-md text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all';
+      } else {
+        p2.classList.remove('hidden');
+        p1.classList.add('hidden');
+        b2.className = 'px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] transition-all';
+        b1.className = 'px-2.5 py-1 rounded-md text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all';
+      }
+    }
+
+    // =========================================================================
+    // TAB 1: TRUE A2UI v0.9 COMPONENT COMPILER & REACTIVE DATAMODEL
+    // =========================================================================
+    let a2uiEditCount = 0;
+    let a2uiHighlightedPaths = new Set();
+
+    const a2uiBlueprints = {
+      canary: {
+        surfaceId: "canary-rollout",
+        rootComponentId: "rollout-card",
+        components: [
+          { id: "rollout-card", component: "Card", children: ["hdr-text", "agent-ack", "canary-slider", "promote-btn"] },
+          { id: "hdr-text", component: "Text", text: { path: "/title" }, badge: { path: "/status" } },
+          { id: "agent-ack", component: "Text", text: { path: "/agentAck" } },
+          { id: "canary-slider", component: "Slider", label: "Canary Split %", min_val: 0, max_val: 100, value: { path: "/canaryPercent" } },
+          {
+            id: "promote-btn",
+            component: "Button",
+            label: "Promote Canary (userAction)",
+            action: {
+              name: "promote_canary",
+              context: [
+                { key: "service", value: { path: "/service" } },
+                { key: "canaryPercent", value: { path: "/canaryPercent" } }
+              ]
+            }
+          }
+        ],
+        dataModel: {
+          "/title": "checkout-api Rollout",
+          "/service": "checkout-api",
+          "/canaryPercent": 15,
+          "/committedPercent": 15,
+          "/status": "CANARY_ACTIVE (ACK)",
+          "/agentAck": "✓ Agent Turn 2: Received promote_canary (15%, rev #2)",
+          "/revision": 2
+        }
+      },
+      guardrails: {
+        surfaceId: "canary-rollout",
+        rootComponentId: "rollout-card",
+        components: [
+          { id: "rollout-card", component: "Card", children: ["hdr-text", "region-select", "canary-slider", "autorb-toggle", "promote-btn"] },
+          { id: "hdr-text", component: "Text", text: { path: "/title" }, badge: { path: "/status" } },
+          { id: "region-select", component: "Select", label: "Target Region", options: ["us-central1", "us-east4", "europe-west1"], value: { path: "/region" } },
+          { id: "canary-slider", component: "Slider", label: "Canary Traffic %", min_val: 0, max_val: 100, value: { path: "/canaryPercent" } },
+          { id: "autorb-toggle", component: "Toggle", label: "Auto-Rollback on p99 > 80ms", value: { path: "/autoRollback" } },
+          {
+            id: "promote-btn",
+            component: "Button",
+            label: "Apply Regional Split",
+            action: {
+              name: "apply_regional_split",
+              context: [
+                { key: "region", value: { path: "/region" } },
+                { key: "canaryPercent", value: { path: "/canaryPercent" } },
+                { key: "autoRollback", value: { path: "/autoRollback" } }
+              ]
+            }
+          }
+        ],
+        dataModel: {
+          "/title": "Multi-Region Guarded Rollout",
+          "/service": "checkout-api",
+          "/region": "us-central1",
+          "/canaryPercent": 25,
+          "/autoRollback": true,
+          "/status": "GUARDED_STAGE",
+          "/revision": 2
+        }
+      },
+      incident: {
+        surfaceId: "canary-rollout",
+        rootComponentId: "rollout-card",
+        components: [
+          { id: "rollout-card", component: "Card", children: ["hdr-text", "reason-select", "drain-btn", "restore-btn"] },
+          { id: "hdr-text", component: "Text", text: { path: "/title" }, badge: { path: "/status" } },
+          { id: "reason-select", component: "Select", label: "Abort Reason", options: ["p99 Latency Spike", "5xx Error Budget Burn", "Schema Mismatch"], value: { path: "/abortReason" } },
+          {
+            id: "drain-btn",
+            component: "Button",
+            variant: "danger",
+            label: "EMERGENCY DRAIN TO 0%",
+            action: {
+              name: "emergency_drain",
+              context: [{ key: "abortReason", value: { path: "/abortReason" } }]
+            }
+          },
+          {
+            id: "restore-btn",
+            component: "Button",
+            variant: "secondary",
+            label: "Restore 10% Probe",
+            action: { name: "restore_probe", context: [] }
+          }
+        ],
+        dataModel: {
+          "/title": "INCIDENT: Canary Alert",
+          "/service": "checkout-api",
+          "/canaryPercent": 50,
+          "/abortReason": "p99 Latency Spike",
+          "/status": "ALERT_ACTIVE",
+          "/revision": 3
+        }
+      }
+    };
+
+    let activeA2UIState = {
+      surfaceId: "canary-rollout",
+      rootComponentId: "rollout-card",
+      componentsMap: {},
+      componentsList: [],
+      dataModel: {}
+    };
+
+    function streamA2UIBlueprint(name) {
+      ['canary', 'guardrails', 'incident'].forEach(id => {
+        const btn = document.getElementById('bp-' + id);
+        if (id === name) {
+          btn.className = 'px-2 py-0.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)]';
+        } else {
+          btn.className = 'px-2 py-0.5 rounded text-xs font-medium bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)]';
+        }
+      });
+
+      const bp = a2uiBlueprints[name];
+      activeA2UIState.surfaceId = bp.surfaceId;
+      activeA2UIState.rootComponentId = bp.rootComponentId;
+      activeA2UIState.componentsList = JSON.parse(JSON.stringify(bp.components));
+      activeA2UIState.dataModel = JSON.parse(JSON.stringify(bp.dataModel));
+      a2uiHighlightedPaths = new Set(Object.keys(activeA2UIState.dataModel));
+
+      document.getElementById('a2ui-json-editor').value = JSON.stringify(
+        {
+          updateComponents: {
+            surfaceId: activeA2UIState.surfaceId,
+            components: activeA2UIState.componentsList
+          }
+        },
+        null,
+        2
+      );
+
+      compileA2UISurface();
+      renderA2UIDataModelTable();
+      document.getElementById('a2ui-last-event').textContent =
+        `Compiled ${activeA2UIState.componentsList.length} A2UI components from '${name}' stream`;
+    }
+
+    function applyCustomJsonEdit() {
+      try {
+        const parsed = JSON.parse(document.getElementById('a2ui-json-editor').value);
+        const list = parsed.updateComponents ? parsed.updateComponents.components : parsed.components;
+        if (!Array.isArray(list)) throw new Error('Expected updateComponents.components array');
+        activeA2UIState.componentsList = list;
+        compileA2UISurface();
+        document.getElementById('a2ui-wire-status').textContent = 'Successfully re-compiled custom JSON → UI!';
+        document.getElementById('a2ui-wire-status').className = 'text-xs text-emerald-500 font-semibold truncate';
+      } catch (err) {
+        document.getElementById('a2ui-wire-status').textContent = 'JSON Error: ' + err.message;
+        document.getElementById('a2ui-wire-status').className = 'text-xs text-rose-500 font-semibold truncate';
+      }
+    }
+
+    function getBoundValue(bindingOrLiteral) {
+      if (bindingOrLiteral && typeof bindingOrLiteral === 'object' && bindingOrLiteral.path) {
+        return activeA2UIState.dataModel[bindingOrLiteral.path];
+      }
+      return bindingOrLiteral;
+    }
+
+    function setBoundValue(path, val, sourceDesc) {
+      a2uiEditCount++;
+      activeA2UIState.dataModel[path] = val;
+      a2uiHighlightedPaths = new Set([path]);
+      document.getElementById('a2ui-mut-badge').textContent =
+        a2uiEditCount + (a2uiEditCount === 1 ? ' edit' : ' edits');
+      document.getElementById('a2ui-last-event').textContent = sourceDesc;
+      renderA2UIDataModelTable();
+    }
+
+    // Core A2UI Compiler: turns the flat `components` adjacency list into real DOM nodes
+    function compileA2UISurface() {
+      activeA2UIState.componentsMap = {};
+      activeA2UIState.componentsList.forEach(c => {
+        activeA2UIState.componentsMap[c.id] = c;
+      });
+
+      document.getElementById('a2ui-node-count').textContent =
+        activeA2UIState.componentsList.length + ' nodes';
+
+      const mount = document.getElementById('a2ui-dynamic-mount');
+      mount.innerHTML = '';
+      const rootDom = compileA2UINode(activeA2UIState.rootComponentId);
+      if (rootDom) mount.appendChild(rootDom);
+    }
+
+    function compileA2UINode(nodeId) {
+      const node = activeA2UIState.componentsMap[nodeId];
+      if (!node) return null;
+
+      // 1. Card Component
+      if (node.component === 'Card') {
+        const card = document.createElement('div');
+        card.className = 'p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2';
+        (node.children || []).forEach(cid => {
+          const childEl = compileA2UINode(cid);
+          if (childEl) card.appendChild(childEl);
+        });
+        return card;
+      }
+
+      // 2. Text (+ optional Badge) Component
+      if (node.component === 'Text') {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-1 text-xs font-semibold';
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = getBoundValue(node.text) ?? '';
+        row.appendChild(titleSpan);
+
+        if (node.badge) {
+          const badgeSpan = document.createElement('span');
+          badgeSpan.className = 'font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500';
+          badgeSpan.textContent = getBoundValue(node.badge) ?? '';
+          row.appendChild(badgeSpan);
+        }
+        return row;
+      }
+
+      // 3. Slider Component (2-Way Bound to JSON Pointer)
+      if (node.component === 'Slider') {
+        const ptr = node.value?.path || '/canaryPercent';
+        const curVal = getBoundValue(node.value) ?? 0;
+        const wrap = document.createElement('div');
+
+        const hdr = document.createElement('div');
+        hdr.className = 'flex justify-between text-xs mb-1';
+        const lbl = document.createElement('span');
+        lbl.className = 'text-[var(--muted-foreground)]';
+        lbl.textContent = `${node.label || 'Value'} (${ptr})`;
+        const valSpan = document.createElement('span');
+        valSpan.className = 'font-mono font-bold text-emerald-500';
+        valSpan.textContent = curVal + '%';
+        hdr.appendChild(lbl);
+        hdr.appendChild(valSpan);
+
+        const rng = document.createElement('input');
+        rng.type = 'range';
+        rng.min = node.min_val ?? 0;
+        rng.max = node.max_val ?? 100;
+        rng.step = 5;
+        rng.value = curVal;
+        rng.className = 'w-full accent-emerald-500 cursor-pointer h-1.5 rounded-lg';
+        rng.oninput = (e) => {
+          const v = parseInt(e.target.value, 10);
+          valSpan.textContent = v + '%';
+          setBoundValue(ptr, v, `Slider mutated ${ptr} → ${v}`);
+        };
+
+        wrap.appendChild(hdr);
+        wrap.appendChild(rng);
+        return wrap;
+      }
+
+      // 4. Select Component (2-Way Bound to JSON Pointer)
+      if (node.component === 'Select') {
+        const ptr = node.value?.path || '/region';
+        const curVal = getBoundValue(node.value);
+        const wrap = document.createElement('div');
+        wrap.className = 'space-y-1';
+
+        const lbl = document.createElement('div');
+        lbl.className = 'text-xs text-[var(--muted-foreground)]';
+        lbl.textContent = `${node.label || 'Select'} (${ptr})`;
+
+        const sel = document.createElement('select');
+        sel.className = 'w-full bg-[var(--secondary)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono';
+        (node.options || []).forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          if (opt === curVal) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.onchange = (e) => {
+          setBoundValue(ptr, e.target.value, `Select mutated ${ptr} → "${e.target.value}"`);
+        };
+
+        wrap.appendChild(lbl);
+        wrap.appendChild(sel);
+        return wrap;
+      }
+
+      // 5. Toggle Component (2-Way Bound to JSON Pointer)
+      if (node.component === 'Toggle') {
+        const ptr = node.value?.path || '/autoRollback';
+        const curVal = Boolean(getBoundValue(node.value));
+        const label = document.createElement('label');
+        label.className = 'flex items-center justify-between text-xs cursor-pointer py-0.5';
+
+        const span = document.createElement('span');
+        span.className = 'text-[var(--muted-foreground)]';
+        span.textContent = node.label || ptr;
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = curVal;
+        chk.className = 'accent-emerald-500 cursor-pointer';
+        chk.onchange = (e) => {
+          setBoundValue(ptr, e.target.checked, `Toggle mutated ${ptr} → ${e.target.checked}`);
+        };
+
+        label.appendChild(span);
+        label.appendChild(chk);
+        return label;
+      }
+
+      // 6. Button Component (Resolves bound context pointers & emits A2UI `userAction`)
+      if (node.component === 'Button') {
+        const btn = document.createElement('button');
+        const isDanger = node.variant === 'danger';
+        const isSec = node.variant === 'secondary';
+        btn.className = isDanger
+          ? 'w-full py-1.5 px-2.5 rounded text-xs font-semibold bg-rose-600 text-white hover:opacity-90 transition-all'
+          : isSec
+          ? 'w-full py-1 px-2.5 rounded text-xs font-medium bg-[var(--secondary)] text-[var(--foreground)] border border-[var(--border)] hover:opacity-90 transition-all'
+          : 'w-full py-1.5 px-2.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-all';
+        btn.textContent = node.label || 'Action';
+        btn.onclick = () => executeA2UIButtonAction(node);
+        return btn;
+      }
+
+      return null;
+    }
+
+    const CALLBACK_PORT = 4891;
+
+    function dispatchWakeupBeaconToAgent(payloadObj) {
+      const encoded = encodeURIComponent(JSON.stringify(payloadObj));
+      const url = `http://127.0.0.1:${CALLBACK_PORT}/callback?payload=${encoded}&t=${Date.now()}`;
+
+      // 1. Try fetch (works in Auxiliary Pane / browser / permissive connect-src)
+      fetch(url, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+
+      // 2. Also fire Image beacon (bypasses connect-src restrictions inside <agent-embed> via img-src)
+      const beacon = new Image();
+      beacon.onload = () => {
+        const el = document.getElementById('a2ui-last-event');
+        if (el) el.textContent = '⚡ Callback delivered to Antigravity! Starting new chat stream...';
+      };
+      beacon.src = url;
+    }
+
+    function executeA2UIButtonAction(btnNode) {
+      a2uiEditCount++;
+      const action = btnNode.action || { name: 'click', context: [] };
+      const resolvedContext = {};
+      (action.context || []).forEach(entry => {
+        resolvedContext[entry.key] = getBoundValue(entry.value);
+      });
+
+      // Apply backend state transition in DataModel
+      const mutated = [];
+      if (action.name === 'emergency_drain') {
+        activeA2UIState.dataModel['/canaryPercent'] = 0;
+        activeA2UIState.dataModel['/status'] = 'DRAINED_0_PCT';
+        mutated.push('/canaryPercent', '/status');
+      } else if (action.name === 'restore_probe') {
+        activeA2UIState.dataModel['/canaryPercent'] = 10;
+        activeA2UIState.dataModel['/status'] = 'PROBE_10_PCT';
+        mutated.push('/canaryPercent', '/status');
+      } else {
+        const pct = activeA2UIState.dataModel['/canaryPercent'] ?? 15;
+        activeA2UIState.dataModel['/committedPercent'] = pct;
+        activeA2UIState.dataModel['/status'] = pct === 100 ? 'FULL_PROMOTED' : 'CANARY_ACTIVE';
+        mutated.push('/committedPercent', '/status');
+      }
+      activeA2UIState.dataModel['/revision'] = (activeA2UIState.dataModel['/revision'] || 1) + 1;
+      activeA2UIState.dataModel['/lastAction'] = action.name;
+      mutated.push('/revision', '/lastAction');
+
+      a2uiHighlightedPaths = new Set(mutated);
+      document.getElementById('a2ui-mut-badge').textContent = a2uiEditCount + ' edits';
+      document.getElementById('a2ui-last-event').textContent =
+        `⚡ Sending userAction("${action.name}") to wake Antigravity...`;
+
+      const userActionEnvelope = {
+        protocol: 'A2UI_v0.9',
+        userAction: {
+          name: action.name,
+          surfaceId: activeA2UIState.surfaceId,
+          sourceComponentId: btnNode.id,
+          context: resolvedContext
+        },
+        dataModelSnapshot: activeA2UIState.dataModel
+      };
+
+      // Wake up the Antigravity agent background task to trigger a new chat stream!
+      dispatchWakeupBeaconToAgent(userActionEnvelope);
+
+      // Show the userAction + Turn 2 updateDataModel delta in the right editor
+      document.getElementById('a2ui-wire-title').textContent = 'userAction ⇄ updateDataModel';
+      document.getElementById('a2ui-json-editor').value = JSON.stringify(
+        {
+          userActionDispatched: {
+            name: action.name,
+            surfaceId: activeA2UIState.surfaceId,
+            sourceComponentId: btnNode.id,
+            context: resolvedContext
+          },
+          agentTurn2UpdateDataModel: {
+            surfaceId: activeA2UIState.surfaceId,
+            path: '/',
+            value: activeA2UIState.dataModel
+          }
+        },
+        null,
+        2
+      );
+
+      compileA2UISurface();
+      renderA2UIDataModelTable();
+    }
+
+    function renderA2UIDataModelTable() {
+      const container = document.getElementById('a2ui-datamodel-table');
+      container.innerHTML = '';
+      Object.entries(activeA2UIState.dataModel).forEach(([path, val]) => {
+        const isHit = a2uiHighlightedPaths.has(path);
+        const row = document.createElement('div');
+        row.className = isHit
+          ? 'flex items-center justify-between px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/50'
+          : 'flex items-center justify-between px-2 py-1 rounded bg-[var(--card)] border border-[var(--border)]';
+        row.innerHTML = `
+          <span class="text-[var(--muted-foreground)]">${path}</span>
+          <span class="font-semibold ${isHit ? 'text-emerald-500' : 'text-[var(--foreground)]'}">${JSON.stringify(val)}</span>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    // =========================================================================
+    // TAB 2: MCP APP (`ui://canary-studio/rollout-widget.html` + postMessage)
+    // =========================================================================
+    const mcpDataModel = {
+      service: "checkout-api",
+      weight_percent: 15,
+      status: "CANARY_HEALTHY",
+      p99_ms: 48,
+      last_rpc_method: "ui/notifications/tool-result",
+      last_agent_prompt: "(none)"
+    };
+    let mcpHighlighted = new Set(["weight_percent", "status"]);
+    let mcpRpcId = 100;
+
+    function mountMcpAppResource() {
+      const mount = document.getElementById('mcp-resource-mount');
+      mount.innerHTML = `
+        <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold">${mcpDataModel.service}</span>
+            <span class="font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">${mcpDataModel.status}</span>
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-[var(--muted-foreground)]">MCP Staged Split</span>
+              <span id="mcp-slider-lbl" class="font-mono font-bold text-emerald-500">${mcpDataModel.weight_percent}%</span>
+            </div>
+            <input id="mcp-rng-input" type="range" min="0" max="100" step="5" value="${mcpDataModel.weight_percent}"
+              class="w-full accent-emerald-500 cursor-pointer h-1.5 rounded-lg" />
+          </div>
+          <button id="mcp-btn-tool" class="w-full py-1.5 px-2.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90">
+            1. postMessage("tools/call") → update_canary_split
+          </button>
+          <button id="mcp-btn-msg" class="w-full py-1 px-2.5 rounded text-xs font-medium bg-[var(--secondary)] text-[var(--foreground)] border border-[var(--border)] hover:opacity-90">
+            2. postMessage("ui/message") → Prompt AGY Agent
+          </button>
+        </div>
+      `;
+
+      document.getElementById('mcp-rng-input').oninput = (e) => {
+        const w = parseInt(e.target.value, 10);
+        document.getElementById('mcp-slider-lbl').textContent = w + '%';
+        mcpDataModel.weight_percent = w;
+        mcpDataModel.p99_ms = Math.round(42 + w * 0.16);
+        mcpDataModel.status = "STAGED_IN_UI";
+        mcpHighlighted = new Set(["weight_percent", "p99_ms", "status"]);
+        renderMcpDataModelTable();
+      };
+
+      document.getElementById('mcp-btn-tool').onclick = () => {
+        window.postMessage({
+          _mcpAppRpc: true,
+          jsonrpc: "2.0",
+          id: ++mcpRpcId,
+          method: "tools/call",
+          params: {
+            name: "update_canary_split",
+            arguments: { service: mcpDataModel.service, weight_percent: mcpDataModel.weight_percent }
+          }
+        }, "*");
+      };
+
+      document.getElementById('mcp-btn-msg').onclick = () => {
+        window.postMessage({
+          _mcpAppRpc: true,
+          jsonrpc: "2.0",
+          id: ++mcpRpcId,
+          method: "ui/message",
+          params: {
+            role: "user",
+            content: {
+              type: "text",
+              text: `Verify ${mcpDataModel.service} at ${mcpDataModel.weight_percent}% (p99=${mcpDataModel.p99_ms}ms)`
+            }
+          }
+        }, "*");
+      };
+    }
+
+    window.addEventListener("message", (event) => {
+      const msg = event.data;
+      if (!msg || !msg._mcpAppRpc) return;
+
+      dispatchWakeupBeaconToAgent({
+        protocol: 'MCP_Apps_JSON_RPC_2.0',
+        rpc: msg,
+        structuredContentSnapshot: mcpDataModel
+      });
+
+      document.getElementById('mcp-rpc-badge').textContent = `id: #${msg.id}`;
+      if (msg.method === "tools/call") {
+        const w = msg.params.arguments.weight_percent;
+        mcpDataModel.weight_percent = w;
+        mcpDataModel.status = w === 100 ? "PROMOTED_100" : (w === 0 ? "ROLLED_BACK" : "COMMITTED_ON_MCP");
+        mcpDataModel.last_rpc_method = `tools/call (#${msg.id})`;
+        mcpHighlighted = new Set(["weight_percent", "status", "last_rpc_method"]);
+
+        const resp = {
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            service: mcpDataModel.service,
+            weight_percent: mcpDataModel.weight_percent,
+            status: mcpDataModel.status
+          }
+        };
+        document.getElementById('mcp-wire-log').textContent =
+          '// ↑ Iframe postMessage Request:\n' + JSON.stringify(msg, null, 2) +
+          '\n\n// ↓ MCP Server Response:\n' + JSON.stringify(resp, null, 2);
+      } else if (msg.method === "ui/message") {
+        mcpDataModel.last_rpc_method = `ui/message (#${msg.id})`;
+        mcpDataModel.last_agent_prompt = msg.params.content.text;
+        mcpDataModel.status = "AGY_TURN_QUEUED";
+        mcpHighlighted = new Set(["status", "last_rpc_method", "last_agent_prompt"]);
+        document.getElementById('mcp-wire-log').textContent =
+          '// ↑ Iframe -> AGY `await agent.chat(...)`:\n' + JSON.stringify(msg, null, 2);
+      }
+
+      mountMcpAppResource();
+      renderMcpDataModelTable();
+    });
+
+    function renderMcpDataModelTable() {
+      const container = document.getElementById('mcp-datamodel-table');
+      container.innerHTML = '';
+      Object.entries(mcpDataModel).forEach(([k, v]) => {
+        const isHit = mcpHighlighted.has(k);
+        const row = document.createElement('div');
+        row.className = isHit
+          ? 'flex items-center justify-between px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/50'
+          : 'flex items-center justify-between px-2 py-1 rounded bg-[var(--card)] border border-[var(--border)]';
+        row.innerHTML = `
+          <span class="text-[var(--muted-foreground)]">${k}</span>
+          <span class="font-semibold truncate max-w-[140px] ${isHit ? 'text-emerald-500' : 'text-[var(--foreground)]'}">${JSON.stringify(v)}</span>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    // Initialize both tabs on load
+    streamA2UIBlueprint('canary');
+    mountMcpAppResource();
+    renderMcpDataModelTable();
+    document.getElementById('mcp-wire-log').textContent = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-result",
+      params: {
+        resourceUri: "ui://canary-studio/rollout-widget.html",
+        structuredContent: mcpDataModel
+      }
+    }, null, 2);
+  </script>
+</body>
+</html>

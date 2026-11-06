@@ -1,0 +1,11 @@
+{
+  "name": "@agent-skills/adaptive-learning",
+  "version": "1.0.0",
+  "description": "Interactive mastery-based learning journeys with embedded <agent-embed> micro-widgets, code diffs, Mermaid diagrams, and closed-loop callback remediation inside Antigravity ask_question.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "list": "node ./scripts/journey-engine.mjs list",
+    "test": "npx --prefix ../ast-graph vitest run --root ."
+  }
+}

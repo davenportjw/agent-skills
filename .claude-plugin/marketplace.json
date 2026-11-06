@@ -26,6 +26,12 @@
       "source": "./plugins/thinking-arcade",
       "description": "Session-gated Space Invaders sidecar game (Model Invaders) that plays while your coding agents are thinking, pauses when any conversation needs you, and lists those conversations with one-click links back, across Antigravity, Claude Code, and Codex CLI.",
       "version": "1.1.0"
+    },
+    {
+      "name": "adaptive-learning",
+      "source": "./plugins/adaptive-learning",
+      "description": "Interactive mastery-based learning journeys with embedded <agent-embed> simulators, code diffs, Mermaid diagrams, and closed-loop callback remediation inside native ask_question cards.",
+      "version": "1.0.0"
     }
   ]
 }

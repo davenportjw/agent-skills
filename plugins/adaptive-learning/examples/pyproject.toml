@@ -1,0 +1,21 @@
+[project]
+name = "agy-ui-examples"
+version = "0.1.0"
+description = "Two Google Antigravity (AGY) SDK examples: (1) A2UI Declarative JSONL Streaming and (2) MCP Apps (ui:// resources + postMessage JSON-RPC bridge)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7.0",
+    "mcp>=1.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"
+

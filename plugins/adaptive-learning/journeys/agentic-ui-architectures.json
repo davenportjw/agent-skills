@@ -1,0 +1,78 @@
+{
+  "journeyId": "agentic-ui-architectures",
+  "title": "Journey 1: Agentic UI Architectures (A2UI vs. MCP Apps vs. Sandboxed Embeds)",
+  "description": "Master how declarative A2UI JSONL component streams, MCP Apps (ui:// resources + JSON-RPC postMessage), and Antigravity's native UI controls work under the hood.",
+  "nodes": [
+    {
+      "nodeId": "wire_protocol_and_security",
+      "title": "1. Declarative Component Streaming (A2UI) vs. Code-Synthesized Iframes",
+      "objective": "Distinguish between streaming declarative JSON component blueprints (A2UI) and serving executable HTML/JS bundles inside sandboxed iframes (MCP Apps & agent-embed).",
+      "primaryModality": {
+        "type": "embed_simulator_in_question",
+        "widgetFile": "a2ui_vs_mcp_micro_widget.html",
+        "questionPrompt": "### Checkpoint 1.1: Wire Protocol & Trust Boundaries\nToggle between **A2UI** and **MCP Apps** in the embedded simulator below, then answer the question:\n\n{{WIDGET_EMBED}}\n\nWhen a remote agent streams a UI across an untrusted enterprise boundary using **Google A2UI v0.9**, what is actually transmitted over the wire to construct the UI?",
+        "options": [
+          "Option A: Declarative JSONL packets (`createSurface`, `updateComponents`, `updateDataModel`) referencing pre-approved host catalog IDs and JSON Pointer paths:\n```json\n{\"id\": \"canary-slider\", \"component\": \"Slider\", \"value\": {\"path\": \"/canaryPercent\"}}\n```",
+          "Option B: A self-contained HTML/JS string mounted inside a sandboxed `<iframe srcdoc=\"...\">` via `_meta.ui.resourceUri`:\n```json\n{\"_meta\": {\"ui\": {\"resourceUri\": \"ui://canary-studio/widget.html\"}}}\n```",
+          "Option C: Raw Tailwind CSS and inline `<script>` tags synthesized on the fly by the LLM and executed via `eval()` in the host DOM."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "confused_a2ui_with_mcp_apps",
+            "diagnosis": "You selected the **MCP Apps (`SEP-1865`)** pattern! MCP Apps serve pre-built HTML/JS bundles via `ui://` resource URIs inside a sandboxed iframe. In contrast, **A2UI** never transmits HTML or JS—it streams declarative JSONL component IDs (`Card`, `Slider`, `Button`) mapped to the host app's native widget catalog."
+          },
+          "2": {
+            "misconceptionId": "assumed_raw_code_execution",
+            "diagnosis": "A2UI specifically eliminates LLM-generated executable HTML/JS to prevent XSS and allow native rendering in non-web hosts like Flutter and SwiftUI."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "diff_and_mermaid_in_question",
+        "questionPrompt": "### Remediation 1.1 (Alternative View: Wire Diff & Architecture Flow)\nLet's look at the exact wire difference between **MCP Apps (`ui://` HTML iframe)** and **A2UI (Declarative Catalog JSONL)**:\n\n```mermaid\nflowchart LR\n  subgraph A2UI[\"A2UI (Zero Executable Code)\"]\n    Ag1[\"Agent\"] -->|\"JSONL: {component: 'Slider', value: {path: '/pct'}}\"| Cat[\"Native Host Catalog (Lit / Flutter)\"]\n  end\n  subgraph MCP[\"MCP Apps (Sandboxed Iframe Code)\"]\n    Srv[\"MCP Server\"] -->|\"ui:// HTML + <script>\"| Ifr[\"Sandboxed <iframe>\"]\n  end\n```\n\n```diff\n--- MCP_App_Resource_Payload (Executable HTML/JS in Iframe)\n+++ A2UI_v0.9_Wire_Payload (Declarative JSONL Component Graph)\n- <input id=\"slider\" type=\"range\" oninput=\"window.parent.postMessage(...)\" />\n+ {\"updateComponents\": {\"surfaceId\": \"main\", \"components\": [\n+   {\"id\": \"slider\", \"component\": \"Slider\", \"value\": {\"path\": \"/weight\"}}\n+ ]}}\n```\n\nSuppose you are building a **native iOS/Flutter mobile client** that cannot safely execute arbitrary LLM-generated `<script>` tags, and you need to update a slider's value from `15` to `50` without re-sending the UI layout. Which A2UI message does the agent stream?",
+        "options": [
+          "Option A: A state-only `updateDataModel` JSONL packet targeting the bound JSON Pointer path:\n```json\n{\"updateDataModel\": {\"surfaceId\": \"main\", \"path\": \"/weight\", \"value\": 50}}\n```",
+          "Option B: A `ui/notifications/tool-result` postMessage sent into a nested `<iframe sandbox=\"allow-scripts\">`.",
+          "Option C: A full HTML page reload with `<input value=\"50\">`."
+        ],
+        "correctIndex": 0
+      }
+    },
+    {
+      "nodeId": "callback_and_schema_mechanics",
+      "title": "2. Bi-Directional Callbacks & Constrained Decoding Schemas",
+      "objective": "Understand how UI callbacks return to the agent in A2UI (`userAction`), MCP Apps (`postMessage` JSON-RPC 2.0), and Gemini `response_schema`.",
+      "primaryModality": {
+        "type": "code_and_diff_in_question",
+        "questionPrompt": "### Checkpoint 1.2: Why Untyped `dict[str, Any]` Fails in `updateDataModel`\nWhen using the Google Antigravity SDK (`LocalAgentConfig(response_schema=...)`) to generate an A2UI `updateDataModel` payload, inspect what happens if `data_model` is typed as `dict[str, Any]` vs. a strongly typed Pydantic model:\n\n```diff\n--- a/example1_a2ui_rollout.py (Produces empty {\"value\": {}} in Gemini constrained decoding)\n+++ b/example1_a2ui_rollout.py (Populates all bound JSON Pointer keys)\n@@ -72,4 +72,9 @@\n+class CanaryDataModel(pydantic.BaseModel):\n+    service: str\n+    canaryPercent: int\n+    status: str\n+\n class A2UITurnResponse(pydantic.BaseModel):\n     surface_id: str\n-    data_model: dict[str, Any] = pydantic.Field(default_factory=dict)\n+    data_model: CanaryDataModel\n```\n\nWhy did `data_model: dict[str, Any]` cause `gemini-3.8-flash` to emit `{\"updateDataModel\": {\"value\": {}}}`?",
+        "options": [
+          "Option A: In Gemini constrained decoding (`response_schema`), an untyped `dict[str, Any]` compiles to an OpenAPI `OBJECT` with zero defined properties, forcing the decoder to emit `{}`.",
+          "Option B: A2UI v0.9 forbids sending `updateDataModel` on the first turn of a session.",
+          "Option C: Pydantic v2 automatically strips dictionary values when serializing to JSONL."
+        ],
+        "correctIndex": 0,
+        "misconceptions": {
+          "1": {
+            "misconceptionId": "thought_a2ui_forbids_turn1_datamodel",
+            "diagnosis": "A2UI v0.9 encourages streaming `createSurface` + `updateComponents` + `updateDataModel` together on Turn 1 so all JSON Pointers (`{\"path\": \"/canaryPercent\"}`) immediately hydrate."
+          },
+          "2": {
+            "misconceptionId": "blamed_pydantic_serializer",
+            "diagnosis": "Pydantic serializes `dict[str, Any]` fine if keys exist; the bug happens upstream during **LLM constrained token decoding**, where Gemini's grammar compiler requires explicit schema properties."
+          }
+        }
+      },
+      "remediationModality": {
+        "type": "mermaid_trace_in_question",
+        "questionPrompt": "### Remediation 1.2 (Execution Trace: Schema Grammar Compilation)\nTrace how `response_schema` is compiled into token-level grammar constraints by the Gemini API:\n\n```mermaid\nsequenceDiagram\n  participant SDK as Antigravity SDK\n  participant Dec as Gemini Constrained Decoder\n  SDK->>Dec: 1. Compiles Pydantic model -> OpenAPI Schema\n  Note over Dec: dict[str, Any] -> {type: OBJECT, properties: {}}\n  Note over Dec: CanaryDataModel -> {type: OBJECT, properties: {service, canaryPercent, status}}\n  Dec-->>SDK: 2. Only allows tokens matching declared properties!\n```\n\nIf you need an A2UI `response_schema` where the agent can emit arbitrary dynamic keys into `updateDataModel` while still satisfying Gemini's strict property requirement, which Pydantic structure works?",
+        "options": [
+          "Option A: Use an explicit `list[DataModelEntry]` with typed `path` and value fields, then convert to a dict in Python:\n```python\nclass DataModelEntry(pydantic.BaseModel):\n    path: str\n    int_val: int | None = None\n    str_val: str | None = None\n```",
+          "Option B: Keep `dict[object, object]` and set `temperature=2.0`.",
+          "Option C: Remove `surface_id` from the schema."
+        ],
+        "correctIndex": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-1.5">
+  <div class="bg-[var(--secondary)]/60 border border-[var(--border)] rounded-lg p-3 space-y-2">
+    <div class="flex items-center justify-between text-xs">
+      <span class="font-semibold text-emerald-500">Token Economics Simulator</span>
+      <span id="sim-verdict" class="font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500">
+        Direct AST Wins (-11.7k tok)
+      </span>
+    </div>
+    <div class="grid grid-cols-2 gap-3 text-xs">
+      <div>
+        <div class="flex justify-between mb-0.5">
+          <span class="text-[var(--muted-foreground)]">Files:</span>
+          <strong id="f-cnt" class="font-mono">2</strong>
+        </div>
+        <input id="r-f" type="range" min="1" max="10" value="2" oninput="recalc()" class="w-full accent-emerald-500 cursor-pointer h-1.5 rounded-lg" />
+      </div>
+      <div>
+        <div class="flex justify-between mb-0.5">
+          <span class="text-[var(--muted-foreground)]">Log Noise:</span>
+          <strong id="n-cnt" class="font-mono">4 KB</strong>
+        </div>
+        <input id="r-n" type="range" min="0" max="100" step="4" value="4" oninput="recalc()" class="w-full accent-emerald-500 cursor-pointer h-1.5 rounded-lg" />
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+      <div class="p-1.5 rounded bg-[var(--card)] border border-[var(--border)] flex justify-between">
+        <span>Root Direct + AST:</span>
+        <strong id="ast-tok" class="text-emerald-500">3.8k in Root</strong>
+      </div>
+      <div class="p-1.5 rounded bg-[var(--card)] border border-[var(--border)] flex justify-between">
+        <span>Subagent (11.5k tax):</span>
+        <strong id="sub-tok" class="text-amber-500">15.5k total (2.1k Root)</strong>
+      </div>
+    </div>
+  </div>
+  <script>
+    function recalc() {
+      const f = parseInt(document.getElementById('r-f').value, 10);
+      const n = parseInt(document.getElementById('r-n').value, 10);
+      document.getElementById('f-cnt').textContent = f;
+      document.getElementById('n-cnt').textContent = n + ' KB';
+      const noiseTok = n * 0.28;
+      const ast = +(f * 1.35 + noiseTok).toFixed(1);
+      const subTotal = +(11.5 + f * 1.45 + noiseTok).toFixed(1);
+      const subRoot = +(1.6 + f * 0.25).toFixed(1);
+      document.getElementById('ast-tok').textContent = ast + 'k in Root';
+      document.getElementById('sub-tok').textContent = `${subTotal}k (${subRoot}k Root)`;
+      const vEl = document.getElementById('sim-verdict');
+      if (n >= 32) {
+        vEl.textContent = `Quarantine Noise in Flash Subagent!`;
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-500';
+      } else if (f <= 4) {
+        vEl.textContent = `Direct AST Wins (-${(subTotal - ast).toFixed(1)}k tok)`;
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500';
+      } else {
+        vEl.textContent = `Parallel Subagent Fan-Out (${f} files)`;
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-500';
+      }
+    }
+  </script>
+</body>
+</html>

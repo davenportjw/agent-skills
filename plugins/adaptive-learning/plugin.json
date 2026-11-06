@@ -1,0 +1,12 @@
+{
+  "name": "adaptive-learning",
+  "displayName": "Adaptive Learning Journeys",
+  "version": "0.1.0",
+  "description": "Interactive mastery-based learning journeys that embed <agent-embed> simulators, code diffs, and Mermaid diagrams directly inside native ask_question cards, validate answers via callback, and pivot to alternative teaching modalities when a learner misses a concept.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Start the Agentic UI Architectures learning journey (A2UI vs. MCP Apps)",
+    "Start the Multi-Agent Token Economics & AST-Graph learning journey",
+    "Show my current learning journey mastery progress and next checkpoint"
+  ]
+}

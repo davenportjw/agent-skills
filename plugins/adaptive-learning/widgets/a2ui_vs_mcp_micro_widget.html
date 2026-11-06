@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-1.5">
+  <div class="bg-[var(--secondary)]/60 border border-[var(--border)] rounded-lg p-3 space-y-2">
+    <div class="flex items-center justify-between gap-2 text-xs">
+      <span class="font-semibold">Interactive Wire Inspector (Inside ask_question)</span>
+      <div class="flex gap-1 bg-[var(--card)] p-0.5 rounded border border-[var(--border)]">
+        <button onclick="setProto('a2ui')" id="b-a2ui" class="px-2 py-0.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)]">A2UI v0.9</button>
+        <button onclick="setProto('mcp')" id="b-mcp" class="px-2 py-0.5 rounded text-xs font-medium text-[var(--muted-foreground)]">MCP App (ui://)</button>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+      <div class="p-2 rounded bg-[var(--card)] border border-[var(--border)]">
+        <div class="text-[var(--muted-foreground)] mb-0.5">Wire Payload Type</div>
+        <div id="w-type" class="font-semibold text-emerald-500">JSONL Catalog IDs + DataModel</div>
+      </div>
+      <div class="p-2 rounded bg-[var(--card)] border border-[var(--border)]">
+        <div class="text-[var(--muted-foreground)] mb-0.5">Callback Mechanism</div>
+        <div id="w-cb" class="font-semibold text-sky-500">userAction (JSON Pointer)</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    function setProto(p) {
+      const b1 = document.getElementById('b-a2ui');
+      const b2 = document.getElementById('b-mcp');
+      if (p === 'a2ui') {
+        b1.className = 'px-2 py-0.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)]';
+        b2.className = 'px-2 py-0.5 rounded text-xs font-medium text-[var(--muted-foreground)]';
+        document.getElementById('w-type').textContent = 'JSONL Catalog IDs + DataModel';
+        document.getElementById('w-cb').textContent = 'userAction (JSON Pointer)';
+      } else {
+        b2.className = 'px-2 py-0.5 rounded text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)]';
+        b1.className = 'px-2 py-0.5 rounded text-xs font-medium text-[var(--muted-foreground)]';
+        document.getElementById('w-type').textContent = 'ui:// HTML + <script> in <iframe>';
+        document.getElementById('w-cb').textContent = 'window.parent.postMessage';
+      }
+    }
+  </script>
+</body>
+</html>

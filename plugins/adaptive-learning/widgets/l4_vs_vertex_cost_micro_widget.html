@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-1.5">
+  <div class="bg-[var(--secondary)]/60 border border-[var(--border)] rounded-lg p-3 space-y-2">
+    <div class="flex items-center justify-between text-xs">
+      <span class="font-semibold text-blue-500">Cloud Run L4 vs. CPU & Vertex AI Simulator</span>
+      <span id="l4-verdict" class="font-mono px-2 py-0.5 rounded bg-blue-500/15 text-blue-500">
+        Dedicated L4 GPU: 185ms TTFT
+      </span>
+    </div>
+    <div class="grid grid-cols-2 gap-3 text-xs">
+      <div>
+        <div class="flex justify-between mb-0.5">
+          <span class="text-[var(--muted-foreground)]">Daily Requests:</span>
+          <strong id="req-cnt" class="font-mono">80k / day</strong>
+        </div>
+        <input id="r-req" type="range" min="5" max="200" step="5" value="80" oninput="recalcL4()" class="w-full accent-blue-500 cursor-pointer h-1.5 rounded-lg" />
+      </div>
+      <div>
+        <div class="flex justify-between mb-0.5">
+          <span class="text-[var(--muted-foreground)]">Min Warm Instances:</span>
+          <strong id="min-cnt" class="font-mono">1 (Warm VRAM)</strong>
+        </div>
+        <input id="r-min" type="range" min="0" max="2" step="1" value="1" oninput="recalcL4()" class="w-full accent-blue-500 cursor-pointer h-1.5 rounded-lg" />
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+      <div class="p-1.5 rounded bg-[var(--card)] border border-[var(--border)]">
+        <div class="text-[var(--muted-foreground)]">Gemma 4 + L4 GPU</div>
+        <strong id="l4-stat" class="text-emerald-500">185ms · $24/d</strong>
+      </div>
+      <div class="p-1.5 rounded bg-[var(--card)] border border-[var(--border)]">
+        <div class="text-[var(--muted-foreground)]">Cloud Run CPU-Only</div>
+        <strong id="cpu-stat" class="text-rose-500">4,200ms (Timeout)</strong>
+      </div>
+      <div class="p-1.5 rounded bg-[var(--card)] border border-[var(--border)]">
+        <div class="text-[var(--muted-foreground)]">Vertex 3.8 Flash</div>
+        <strong id="vtx-stat" class="text-blue-500">210ms · $32/d</strong>
+      </div>
+    </div>
+  </div>
+  <script>
+    function recalcL4() {
+      const reqK = parseInt(document.getElementById('r-req').value, 10);
+      const minInst = parseInt(document.getElementById('r-min').value, 10);
+      document.getElementById('req-cnt').textContent = reqK + 'k / day';
+      document.getElementById('min-cnt').textContent = minInst === 0 ? '0 (Cold Start!)' : `${minInst} (Warm VRAM)`;
+      const l4Ttft = minInst === 0 ? '14,800ms (Cold)' : '185ms';
+      const l4Cost = Math.round(minInst * 16 + reqK * 0.1);
+      const vtxCost = Math.round(reqK * 0.4);
+      document.getElementById('l4-stat').textContent = `${l4Ttft} · $${l4Cost}/d`;
+      document.getElementById('vtx-stat').textContent = `210ms · $${vtxCost}/d`;
+      const vEl = document.getElementById('l4-verdict');
+      if (minInst === 0) {
+        vEl.textContent = 'Warning: 14.8s Weight-Load Cold Start!';
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-rose-500/15 text-rose-500';
+      } else if (reqK < 40) {
+        vEl.textContent = `Low Volume: Serverless Vertex Flash Saves $${l4Cost - vtxCost}/d`;
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-500';
+      } else {
+        vEl.textContent = `Sustained Traffic: Warm L4 GPU Saves $${vtxCost - l4Cost}/d @ 185ms`;
+        vEl.className = 'font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500';
+      }
+    }
+  </script>
+</body>
+</html>
