@@ -877,7 +877,7 @@ if (isMain) {
   const resolvedDisplayMode =
     transition.displayMode ||
     resolveArcadeFlags({ workspaceRoot: transition.workspaceRoot }).values.display_mode ||
-    'window';
+    'auxiliary';
   if (
     shouldOpenArcadeWindow({
       displayMode: resolvedDisplayMode,

@@ -75,13 +75,13 @@ Restart Antigravity after linking so the new plugin directory is discovered.
 
 | Mode | Behavior |
 | :--- | :--- |
-| **`window`** *(default)* | One shared game window for all conversations, opened and raised by the hook on prompt start. No click, no chat output, no agent tool calls. |
-| **`auxiliary`** | The agent streams a `▶ Open Model Invaders` pill (`sidecar://thinking-arcade/arcade-daemon/`); clicking it opens the Right Auxiliary Pane. |
+| **`auxiliary`** *(default)* | The agent streams a `▶ Open Model Invaders` pill (`sidecar://thinking-arcade/arcade-daemon/`); clicking it opens the game in the Right Auxiliary Pane. Nothing opens outside Antigravity. |
+| **`window`** | One shared game window for all conversations, opened and raised by the hook on prompt start. No click, no chat output, no agent tool calls. |
 | **`inline`** / **`inline-follow`** | Embeds `<agent-embed src="file://.../model_invaders_arcade.html">` in chat on turn 1 / on every turn. |
 | **`both`** | Pill plus inline embed. |
 | **`off`** | No auto-mounting; the daemon still serves `http://127.0.0.1:4777`. |
 
-#### Window mode (default)
+#### Window mode (`mode window`)
 
 - **One window, every conversation.** The hook opens `http://127.0.0.1:4777/?scope=global` as a chromeless Chrome app window (`--app`, falling back to the default browser) and, on later prompts, raises the existing window via AppleScript instead of opening a duplicate. The first run may trigger a macOS Automation permission prompt for Google Chrome.
 - **Cross-session gate.** The daemon aggregates every conversation updated in the last 30 minutes (`computeGlobalState` in `arcade-server.mjs`). The game **plays while every live conversation is working** and **pauses when any conversation needs you**: a finished turn, a pending `ask_question`, or an approval. On those events the hook hands focus back to Antigravity, but only if the game window is frontmost.
@@ -89,7 +89,7 @@ Restart Antigravity after linking so the new plugin directory is discovered.
 - **Needs you list.** Below the game, every conversation waiting on you is listed with its reason, last prompt, workspace, and age (`waiting` in the global payload; dismissed finished turns are dimmed). In the window, **Open ↗** (`POST /api/focus`) brings Antigravity to the front (`THINKING_ARCADE_FOCUS_APP` overrides the app name) and copies the prompt to the clipboard, because there is no documented per-conversation deep link for external windows.
 - **Closing is respected.** The daemon tracks the window through its live connection (`/events?scope=global`; `gameWindow` in state, `GET /api/window`). After you close it, prompts don't reopen it; the agent streams a **▶ Reopen Model Invaders** link to `http://127.0.0.1:4777/open` instead. Reopening restores auto-raise.
 
-#### Right Auxiliary Pane
+#### Right Auxiliary Pane (default)
 
 Opened from the `▶ Open Model Invaders` pill, the pane shows the same cross-conversation view, and each **Needs you** row is a `conversation://<id>` link (**Go to chat →**) that switches Antigravity to that conversation. Antigravity scopes the pane to the current conversation, so it closes when you switch and needs a click to reopen. The pane connects with `host=pane` and never counts as the game window. Antigravity runs its own copy of `arcade-server.mjs` for the pane; every copy re-reads the shared state file, so all views stay in sync.
 

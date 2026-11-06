@@ -12,7 +12,8 @@
 
 ## Cross-Session Behavior
 
-- **One global game window** (`/?scope=global`, the default `window` mode) aggregates every live conversation: it plays while any conversation is working and pauses as soon as one needs you (turn finished, `ask_question`, or a permission prompt).
+- **Right Auxiliary Pane (default)**: the agent streams a `▶ Open Model Invaders` pill; clicking it docks the game in the right pane, where each Needs you row links to its conversation.
+- **Optional global game window** (`mode window`, `/?scope=global`) aggregates every live conversation: it plays while any conversation is working and pauses as soon as one needs you (turn finished, `ask_question`, or a permission prompt).
 - **Needs you** list under the game shows each waiting conversation. In the window, **Open ↗** focuses Antigravity (`POST /api/focus`, override the app with `THINKING_ARCADE_FOCUS_APP`) and copies the prompt; in the Right Auxiliary Pane each row is a `conversation://<id>` link that jumps to that chat.
 - **Keep playing** (`POST /api/ack`) dismisses the current waiting set and resumes play; a new prompt also auto-acknowledges (on the first `PreInvocation` of the turn, which can lag while Antigravity compacts a long conversation).
 - **Close detection**: the window is tracked over SSE. After you close it the hook does not reopen it; instead the agent prints a `▶ Reopen Model Invaders` link (`GET /open`).
@@ -36,9 +37,9 @@
 ln -sfn "$(pwd)/plugins/thinking-arcade" ~/.gemini/config/plugins/thinking-arcade
 node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs start
 
-# Where the game renders (window [default] | auxiliary | inline | inline-follow | both | off):
-node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs mode window
+# Where the game renders (auxiliary [default] | window | inline | inline-follow | both | off):
 node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs mode auxiliary
+node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs mode window
 node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs flags
 ```
 

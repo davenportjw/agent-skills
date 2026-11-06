@@ -222,9 +222,9 @@ describe('thinking-arcade plugin (Model Invaders sidecar)', () => {
     const wsRoot = path.join(tmpDir, 'ws');
     const artifactDir = path.join(tmpDir, 'artifacts-modes');
 
-    // 1. Default is 'window' (hook opens a standalone app window on prompt start; no agent tool calls)
+    // 1. Default is 'auxiliary' (agent streams a pill that docks the game in the Right Auxiliary Pane)
     const defResolved = resolveArcadeFlags({ globalConfigPath: globalCfg, workspaceRoot: wsRoot });
-    expect(defResolved.values.display_mode).toBe('window');
+    expect(defResolved.values.display_mode).toBe('auxiliary');
     expect(defResolved.details.display_mode.source).toBe('default');
 
     // 2. Global override -> 'inline-follow' (Option 3: re-pins at the bottom of every turn)
@@ -362,7 +362,7 @@ describe('thinking-arcade plugin (Model Invaders sidecar)', () => {
     resetArcadeFlags({ scope: 'workspace', workspaceRoot: wsRoot });
     resetArcadeFlags({ scope: 'global', globalConfigPath: globalCfg });
     const afterReset = resolveArcadeFlags({ globalConfigPath: globalCfg, workspaceRoot: wsRoot });
-    expect(afterReset.values.display_mode).toBe('window');
+    expect(afterReset.values.display_mode).toBe('auxiliary');
   });
 
   it('display_mode=window opens a chromeless app window only at prompt start when no client is polling', () => {

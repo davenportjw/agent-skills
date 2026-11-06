@@ -49,9 +49,6 @@
         <div id="hud-lives" class="px-2 py-1 rounded-md bg-[var(--background)] border border-[var(--border)] text-rose-500">
           ❤️❤️❤️
         </div>
-        <button id="btn-demo-override" onclick="toggleManualOverride()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs transition" title="Toggle manual simulation mode">
-          ⚡ Sim Thinking
-        </button>
         <button id="btn-pip" onclick="openFloatingArcade()" class="px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--secondary)] text-[var(--foreground)] text-xs transition" title="Pop out into a pinned floating Picture-in-Picture window">
           📌 Pop-Out PiP
         </button>
@@ -77,37 +74,17 @@
           <button id="btn-keep-playing" onclick="ackAttention()" class="hidden px-3 py-1 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs transition">
             ▶ Keep playing (Enter)
           </button>
-          <button onclick="triggerHookState('THINKING', 'PreInvocation', 'Manual Simulator')" class="px-3 py-1 rounded-md bg-amber-500 text-slate-950 font-semibold text-xs transition">
-            ▶ Resume Wave (Sim Thinking)
-          </button>
-          <button onclick="triggerHookState('TOOL_RUNNING', 'PreToolUse', 'ast_symbol')" class="px-3 py-1 rounded-md bg-slate-800 text-slate-200 border border-slate-700 text-xs transition">
-            🔧 Spawn Tool UFO
-          </button>
         </div>
       </div>
     </div>
 
-    <!-- Bottom Legend + Quick Hook Controls -->
+    <!-- Bottom Legend -->
     <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs font-mono text-[var(--muted-foreground)]">
       <div class="flex flex-wrap items-center gap-2.5">
         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-rose-500 inline-block"></span> HALLUCIN (30)</span>
         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-500 inline-block"></span> CTX_DRIFT (20)</span>
         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></span> RAW_GREP (10)</span>
         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-emerald-400 inline-block"></span> TOOL UFO (100)</span>
-      </div>
-      <div class="flex items-center gap-1.5">
-        <button onclick="triggerHookState('THINKING', 'PreInvocation', 'Agent reasoning')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
-          ▶ Think
-        </button>
-        <button onclick="triggerHookState('TOOL_RUNNING', 'PreToolUse', 'ast_blast_radius')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
-          🔧 Tool
-        </button>
-        <button onclick="triggerHookState('WAITING_FOR_APPROVAL', 'PermissionRequest', 'Awaiting user confirmation')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
-          ⏸ Ask
-        </button>
-        <button onclick="triggerHookState('IDLE', 'Stop', 'Turn complete')" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] text-xs">
-          ⏹ Stop
-        </button>
       </div>
     </div>
 
@@ -146,7 +123,6 @@
     const ctx = canvas.getContext('2d');
 
     let sessionState = INITIAL_ARCADE_STATE.state || 'THINKING';
-    let manualOverride = false;
     let lastSeenUpdatedAt = INITIAL_ARCADE_STATE.updatedAt || '';
     let score = Number(INITIAL_ARCADE_STATE.score) || 0;
     let highScore = Number(INITIAL_ARCADE_STATE.highScore) || 0;
@@ -242,7 +218,6 @@
     document.getElementById('hud-lives').textContent = '❤️'.repeat(lives);
 
     function isGamePlayable() {
-      if (manualOverride) return true;
       return sessionState === 'THINKING' || sessionState === 'TOOL_RUNNING';
     }
 
@@ -393,13 +368,6 @@
         keys.right = false;
         keys.fire = false;
         saveWaveCheckpoint();
-        if (manualOverride && isNewEvent) {
-          manualOverride = false;
-          const btn = document.getElementById('btn-demo-override');
-          if (btn) {
-            btn.textContent = '⚡ Sim Thinking';
-          }
-        }
       }
 
       if (typeof data.highScore === 'number' && data.highScore > highScore) {
@@ -436,7 +404,7 @@
         } else {
           pill.className = 'px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5';
           dot.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
-          stateText.textContent = manualOverride ? 'SIM THINKING' : 'AGENT THINKING';
+          stateText.textContent = 'AGENT THINKING';
           subtitle.textContent = `Hook: ${data.lastEvent || 'PreInvocation'} — Wave Active (←/→ or mouse, SPACE/click to fire)`;
         }
       } else {
@@ -478,13 +446,6 @@
     // Apply initial stamped state immediately on script load
     applySidecarState(INITIAL_ARCADE_STATE);
 
-    function toggleManualOverride() {
-      manualOverride = !manualOverride;
-      const btn = document.getElementById('btn-demo-override');
-      btn.textContent = manualOverride ? '⚡ Sim Active (On)' : '⚡ Sim Thinking';
-      applySidecarState({ state: sessionState, highScore });
-    }
-
     async function openFloatingArcade() {
       const targetUrl = `http://127.0.0.1:4777${SESSION_ID ? '?sessionId=' + encodeURIComponent(SESSION_ID) : ''}`;
       try {
@@ -512,32 +473,6 @@
       window.location.protocol === 'http:' || window.location.protocol === 'https:'
         ? ''
         : 'http://127.0.0.1:4777';
-
-    async function triggerHookState(state, eventName, detail) {
-      if (state === 'THINKING' || state === 'TOOL_RUNNING') {
-        manualOverride = false;
-        document.getElementById('btn-demo-override').textContent = '⚡ Sim Thinking';
-      }
-      try {
-        const res = await fetch(`${SIDECAR_BASE}/api/event`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, event: eventName, detail, harness: 'antigravity', score })
-        });
-        if (res.ok) {
-          const payload = await res.json();
-          applySidecarState(payload.status);
-          return;
-        }
-      } catch {}
-      applySidecarState({
-        state,
-        lastEvent: eventName,
-        detail,
-        updatedAt: new Date().toISOString(),
-        highScore: Math.max(score, highScore)
-      });
-    }
 
     async function syncScoreToServer() {
       if (score > highScore) {
