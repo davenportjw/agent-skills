@@ -135,6 +135,7 @@ export const SUMMARY_MARKER = '=== TARGET SUMMARY ===';
  * forcing an extra read round trip. Staying under this budget keeps results inline.
  */
 export const INLINE_BYTE_BUDGET = 3800;
+export const BATCH_INLINE_BYTE_BUDGET = 4000;
 
 const DETAILS_MARKER = '--- details ---';
 
@@ -229,12 +230,13 @@ export function formatCompactCliOutput(
   const isBatch =
     Array.isArray(rec.batchItems) || Array.isArray(rec.results) || Array.isArray(rec.outlines);
   if (isBatch) {
+    const batchBudget = options.maxBytes ?? BATCH_INLINE_BYTE_BUDGET;
     const untruncated = formatCompactBody(command, data, queryArg, Number.MAX_SAFE_INTEGER);
     const fullOutputPath =
-      options.tee === false || byteLen(untruncated) <= maxBytes
+      options.tee === false || byteLen(untruncated) <= batchBudget
         ? undefined
         : teeFullOutput(rec.workspaceRoot, command, untruncated);
-    return formatCompactBody(command, data, queryArg, maxBytes, fullOutputPath);
+    return formatCompactBody(command, data, queryArg, batchBudget, fullOutputPath);
   }
   const untruncated = moveSummaryFirst(
     formatCompactBody(command, data, queryArg, Number.MAX_SAFE_INTEGER),
@@ -255,14 +257,18 @@ function formatBatch(
   const perItem =
     maxBytes >= Number.MAX_SAFE_INTEGER / 2
       ? Number.MAX_SAFE_INTEGER
-      : Math.max(450, Math.floor((maxBytes - byteLen(header) - 40) / Math.max(1, items.length)));
+      : Math.max(540, Math.floor((maxBytes - byteLen(header) - 40) / Math.max(1, items.length)));
   const parts = items.map((item, idx) => {
     const rendered = moveSummaryFirst(formatCompactBody(item.command, item.data, item.target, perItem));
     return enforceInlineSizeCap(`### [${idx + 1}/${items.length}] ${item.target}\n${rendered}`, perItem, {
       fullOutputPath,
     });
   });
-  return [header, ...parts].join('\n\n');
+  const joined = [header, ...parts].join('\n\n');
+  if (maxBytes >= Number.MAX_SAFE_INTEGER / 2 || byteLen(joined) <= maxBytes) {
+    return joined;
+  }
+  return enforceInlineSizeCap(joined, maxBytes, { fullOutputPath });
 }
 
 function formatCompactBody(
@@ -475,9 +481,17 @@ function formatCompactBody(
       lines.push(`Target Symbol: ${sym.name} (${sym.kind})`);
       lines.push(`Exact Location: ${sym.filePath}#L${sym.startLine}-L${sym.endLine}`);
       lines.push(`Signature: ${oneLine(String(sym.signature ?? sym.name), 120)}`);
-      lines.push(
-        `Recommended Action: view_file on ${sym.filePath} with StartLine=${sym.startLine}, EndLine=${sym.endLine}`,
-      );
+      const symSpan = Number(sym.endLine) - Number(sym.startLine);
+      if (symSpan > 250) {
+        const cappedEnd = Number(sym.startLine) + 200;
+        lines.push(
+          `Recommended Action: view_file on ${sym.filePath} with StartLine=${sym.startLine}, EndLine=${cappedEnd} (${sym.name} spans ${symSpan + 1} lines; use ast_outline with filter on ${sym.filePath} to jump to inner handlers)`,
+        );
+      } else {
+        lines.push(
+          `Recommended Action: view_file on ${sym.filePath} with StartLine=${sym.startLine}, EndLine=${sym.endLine}`,
+        );
+      }
       return lines.join('\n');
     }
   }
@@ -533,18 +547,38 @@ function formatCompactBody(
       return lines.join('\n');
     }
     lines.push(`File Outline: ${filePath} (${matchedCount}/${totalSymbols} symbols matched)`);
+    const isCompactBatchItem = maxBytes < INLINE_BYTE_BUDGET;
     if (symbols.length > 0) {
       const keySpans = symbols
-        .slice(0, 8)
+        .slice(0, isCompactBatchItem ? 5 : 8)
         .map((s) => `${s.name} (${s.kind} #L${s.startLine}-L${s.endLine})`)
         .join(', ');
       lines.push(`Key Spans: ${keySpans}`);
     }
     if (first) {
-      lines.push(`First Matched Symbol: ${first.name} (${first.kind}) at ${filePath}#L${first.startLine}-L${first.endLine}`);
-      lines.push(
-        `Recommended Action: view_file on ${filePath} with StartLine=${first.startLine}, EndLine=${first.endLine}`,
-      );
+      if (!isCompactBatchItem) {
+        lines.push(`First Matched Symbol: ${first.name} (${first.kind}) at ${filePath}#L${first.startLine}-L${first.endLine}`);
+      }
+      const firstSpan = Number(first.endLine) - Number(first.startLine);
+      if (firstSpan > 250) {
+        const boundedChild = symbols.find(
+          (s) => s !== first && Number(s.endLine) - Number(s.startLine) <= 250,
+        );
+        if (boundedChild) {
+          lines.push(
+            `Recommended Action: view_file on ${filePath} with StartLine=${boundedChild.startLine}, EndLine=${boundedChild.endLine} (${first.name} spans ${firstSpan + 1} lines; read bounded inner spans or narrow with filter)`,
+          );
+        } else {
+          const cappedEnd = Number(first.startLine) + 200;
+          lines.push(
+            `Recommended Action: view_file on ${filePath} with StartLine=${first.startLine}, EndLine=${cappedEnd} (${first.name} spans ${firstSpan + 1} lines; narrow with filter)`,
+          );
+        }
+      } else {
+        lines.push(
+          `Recommended Action: view_file on ${filePath} with StartLine=${first.startLine}, EndLine=${first.endLine}`,
+        );
+      }
     } else {
       lines.push('Recommended Action: Try a broader --filter or omit --kind');
     }

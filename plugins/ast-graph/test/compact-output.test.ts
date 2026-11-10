@@ -113,6 +113,26 @@ describe('compact output budget (efficacy review: inline spill avoidance)', () =
     expect(out.match(new RegExp(SUMMARY_MARKER, 'g'))?.length).toBe(3);
   });
 
+  it('recommends bounded inner spans instead of >250-line container wrappers in outline', () => {
+    const out = formatCompactCliOutput(
+      'outline',
+      {
+        filePath: 'apps/api/src/app.ts',
+        lineCount: 3356,
+        totalSymbolsInFile: 122,
+        matchedSymbolsCount: 122,
+        symbols: [
+          { name: 'createApp', kind: 'Function', exported: true, startLine: 46, endLine: 3355, signature: 'export function createApp()' },
+          { name: 'resolveActor', kind: 'Function', exported: false, startLine: 85, endLine: 94, signature: 'function resolveActor()' },
+        ],
+      },
+      'apps/api/src/app.ts',
+      { tee: false },
+    );
+    expect(out).toContain('StartLine=85, EndLine=94');
+    expect(out).toContain('createApp spans 3310 lines');
+  });
+
   it('tees the untruncated output to <repo>/.ast-graph/last and references it in the footer', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ast-graph-tee-'));
     tempDirs.push(repo);

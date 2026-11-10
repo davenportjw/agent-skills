@@ -17,6 +17,7 @@ export declare const SUMMARY_MARKER = "=== TARGET SUMMARY ===";
  * forcing an extra read round trip. Staying under this budget keeps results inline.
  */
 export declare const INLINE_BYTE_BUDGET = 3800;
+export declare const BATCH_INLINE_BYTE_BUDGET = 4000;
 /** Hoist the trailing summary block directly beneath the first (header) line. */
 export declare function moveSummaryFirst(text: string): string;
 export interface InlineCapOptions {

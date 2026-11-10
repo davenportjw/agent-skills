@@ -771,7 +771,7 @@ export class AstMcpServer {
                         const filter = args.filter ? String(args.filter) : undefined;
                         const kind = args.kind ? String(args.kind) : undefined;
                         const exportedOnly = Boolean(args.exportedOnly);
-                        const limit = args.limit !== undefined ? Number(args.limit) : 40;
+                        const limit = args.limit !== undefined ? Number(args.limit) : filePaths.length > 1 ? 30 : 65;
                         if (filePaths.length > 1) {
                             payload = {
                                 workspaceRoot,

@@ -14,7 +14,21 @@ Always use the **AST GraphDB Plugin** (`ast-graph` MCP server or `node ~/.gemini
 - If a tool returns `NO_WORKSPACE` or `UNKNOWN_WORKSPACE`, retry with `workspace` set to one of the listed repos. Do not fall back to grep. The server never defaults to the plugin install directory.
 
 ## 2. Strict Anti-Chunking & AST-First Lookup Mandate
-1. **NEVER Chunk-Read Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, and never page through files in 800-line chunks (`1-800`, `801-1600`, ...).
-2. **Sequential AST-First Lookup**: Run `ast_symbol`, `ast_refs`, `ast_outline`, or `ast_search` **first**. Read the `=== TARGET SUMMARY ===` block, which sits directly under the header line, for exact `filePath#L<start>-L<end>` spans, then read only that exact line range. Results are capped at about 3.8 KB inline. If lines were omitted, narrow with `filter`/`kind`, or open the `full output:` path from the footer.
-3. **Targeted Test Selection**: Before running a full test suite, run `ast_tests_for` or `ast_blast_radius` to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, or `go test ...`).
-4. **Batch Symbols, Grep Literals**: For several identifiers, pass `queries: [...]` to one `ast_search` / `ast_symbol` / `ast_refs` call instead of a `grep "a\|b\|c"` alternation. String literals, UI copy, CSS values, and log text are not symbols, so use `grep -rn` / `rg` for those.
+1. **NEVER Chunk-Read or Shell-Slice Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, never page through files in 800-line chunks (`1-800`, `801-1600`, ...), and **never use bash `sed -n X,Yp`, `cat`, `head`, or `tail` via `run_command` to bypass `ast_outline` + `read_file`**.
+2. **Sequential AST-First Lookup (No Regex Structural Outlines)**: Run `ast_symbol`, `ast_refs`, `ast_outline`, or `ast_search` **first** instead of `grep -n "function|class|interface|def "`. Read the `=== TARGET SUMMARY ===` block directly under the header line for exact `filePath#L<start>-L<end>` spans, then call `read_file` on only that exact line range (`<= 250` lines).
+3. **Zero-Lookup Turn-1 Invocation (Call Directly Without Schema Reads)**:
+   - **MCP (`call_mcp_tool` with `ServerName: "ast-graph_ast-graph"`, no schema read needed)**:
+     - `ToolName: "ast_outline"`, `Arguments: { "filePaths": ["path/a.ts", "path/b.ts"], "filter": "optional", "workspace": "<repo>" }`
+     - `ToolName: "ast_search"`, `Arguments: { "queries": ["symA", "symB"], "kind": "optional", "workspace": "<repo>" }`
+     - `ToolName: "ast_symbol"`, `Arguments: { "queries": ["symA", "symB"], "workspace": "<repo>" }`
+     - `ToolName: "ast_refs"`, `Arguments: { "targets": ["propOrSymbol"], "workspace": "<repo>" }`
+     - `ToolName: "ast_blast_radius"`, `Arguments: { "target": "symOrFile", "workspace": "<repo>" }`
+     - `ToolName: "ast_tests_for"`, `Arguments: { "target": "symOrFile", "workspace": "<repo>" }`
+     - `ToolName: "ast_lineage"`, `Arguments: { "target": "POST /api/route or Schema", "workspace": "<repo>" }`
+   - **CLI in `run_command` (when chaining inside a shell command)**:
+     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline <file1> [file2...] [--filter <kw>] --workspace <repo>`
+     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <sym1> [sym2...] --workspace <repo>`
+     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js search <q1> [q2...] --workspace <repo>`
+     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js refs <prop> --workspace <repo>`
+4. **Targeted Test Selection**: Before running a full test suite, run `ast_tests_for` or `ast_blast_radius` to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, or `go test ...`).
+5. **Batch Symbols, Grep Literals Only**: For several identifiers, pass `queries: [...]` / `filePaths: [...]` (or multiple CLI args) in a single call instead of `grep "a\|b\|c"`. Reserve `grep -rn` / `rg` strictly for string literals, UI copy, CSS values, and log text that are not code symbols.

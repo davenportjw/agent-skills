@@ -86,11 +86,12 @@ If none of these match, the tool returns `NO_WORKSPACE` with the list of known r
 
 ### Output Contract (compact, summary-first, inline-budgeted)
 
-- Every text result is **at most about 3.8 KB**, so agent harnesses keep it inline instead of spilling it to a file.
+- Every text result is **at most about 3.8 KB** (4.6 KB for multi-target batches), so agent harnesses keep it inline instead of spilling it to a file.
 - Line 1 is the header (`[repo=…] [AST …]`). It is followed **immediately** by the `=== TARGET SUMMARY ===` block (top match, exact `filePath#L<start>-L<end>`, recommended `read_file` range or test command), then `--- details ---`.
+- When a top-level symbol in `ast_outline` or `ast_symbol` is a large container (`> 250` lines, such as `createApp` or `App`), `Recommended Action` automatically points to the first bounded inner symbol (`<= 250` lines) or a capped 200-line window and advises narrowing with `filter`.
 - When results exceed the budget, only detail lines are dropped. The footer says how many lines were omitted and where the full output was saved: `<repo>/.ast-graph/last/<command>.txt`.
-- `ast_outline` prints the file path once in the header. Detail lines carry only `L<start>-L<end>` spans. `ast_search` groups hits under each file path.
-- Default limits: search 15, outline 40, refs 25 per category, symbol 20. Narrow with `filter`, `kind`, or `limit` rather than raising the limit.
+- `ast_outline` prints the file path once in the header. Detail lines carry only `L<start>-L<end>` spans. `ast_search` groups hits under each file path and ranks primary source code symbols ahead of `StylesheetSection` rules, docs/mockups, and test files.
+- Default limits: search 15, outline 65 (30 per file in batches), refs 25 per category, symbol 20. Narrow with `filter`, `kind`, or `limit` rather than raising the limit.
 - **Batch instead of grep alternations.** `ast_search`, `ast_symbol`, and `ast_refs` accept `queries: [...]` / `targets: [...]`. Each batch item keeps its own summary within a shared budget.
 - Zero-result diagnostics:
   - `NOT INDEXED` (run `ast_sync` with `paths`).

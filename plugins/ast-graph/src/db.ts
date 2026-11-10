@@ -881,8 +881,8 @@ export class AstGraphDatabase {
              AND kind NOT IN ('File', 'WorkspacePackage')
            ORDER BY
              CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN LOWER(name) LIKE LOWER(?) THEN 1 ELSE 2 END,
-             CASE WHEN kind IN ('TestCase', 'TestSuite') THEN 1 ELSE 0 END,
-             CASE WHEN file_path LIKE '%.test.ts' THEN 1 ELSE 0 END,
+             CASE WHEN kind IN ('TestCase', 'TestSuite', 'StylesheetSection', 'CssAtRule', 'DocumentSection', 'TemplateLandmark') THEN 1 ELSE 0 END,
+             CASE WHEN file_path LIKE '%.test.%' OR file_path LIKE '%.spec.%' OR file_path LIKE 'docs/%' OR file_path LIKE '%/mocks/%' OR file_path LIKE '%mockup%' THEN 1 ELSE 0 END,
              exported DESC,
              complexity DESC
            LIMIT ?`;
@@ -984,7 +984,11 @@ export class AstGraphDatabase {
           `SELECT * FROM nodes
            WHERE kind NOT IN ('File', 'WorkspacePackage', 'TestCase', 'TestSuite')
              AND (LOWER(name) LIKE ? OR LOWER(name) LIKE ? OR LOWER(qualified_name) LIKE ?)
-           ORDER BY exported DESC, complexity DESC
+           ORDER BY
+             CASE WHEN kind IN ('StylesheetSection', 'CssAtRule', 'DocumentSection', 'TemplateLandmark') THEN 1 ELSE 0 END,
+             CASE WHEN file_path LIKE '%.test.%' OR file_path LIKE '%.spec.%' OR file_path LIKE 'docs/%' OR file_path LIKE '%/mocks/%' OR file_path LIKE '%mockup%' THEN 1 ELSE 0 END,
+             exported DESC,
+             complexity DESC
            LIMIT ?`,
         )
         .all(prefix, sub, sub, limit) as Array<Record<string, unknown>>;
