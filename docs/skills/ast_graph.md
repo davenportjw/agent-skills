@@ -53,7 +53,27 @@ npm install --omit=dev
 ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
 ```
 
-Restart Antigravity after linking. If you have the old `~/.gemini/config/plugins/ast-graph-traceability` folder, remove it so the two don't both load.
+Restart Antigravity after linking. If you have the old `~/.gemini/config/plugins/ast-graph-traceability` folder, remove it so the two don't both load. Don't also register a per-repo copy (for example an old `warehouse-ast-graph` MCP server or sidecar); the one global plugin serves every repo.
+
+### OpenAI Codex CLI
+
+Codex has no plugin hooks, so register the MCP server once in `~/.codex/config.toml` (or a repo's `.codex/config.toml`). Queries lazily re-sync changed files before answering, so no hook is required:
+
+```toml
+[mcp_servers.ast-graph]
+command = "node"
+args = ["--no-warnings", "/Users/<you>/.gemini/config/plugins/ast-graph/dist/mcp.js"]
+```
+
+## Multiple Repos, Worktrees & Concurrency
+
+- One database per repo: each repository gets `<repo>/.ast-graph/ast.db`. A single MCP server process answers for any repo; tools take an optional `workspace` (name or path) and otherwise resolve from the session's roots/cwd.
+- Repo boundaries: nested git checkouts (`.worktrees/*`, submodules, vendored clones) are never indexed into the parent. Query them with `workspace: "<path>"`; they get their own index.
+- Moved or renamed checkouts are rebound automatically instead of failing a tamper check.
+- Single writer: `.ast-graph/sync.lock` (PID + heartbeat) lets Claude Code, Antigravity, Codex, hooks, and CLI runs share one repo index. Non-owners answer from the last committed index (`[index busy]`); with no index yet they return `INDEX_BUILDING`.
+- Hooks (Antigravity and Claude Code) re-index edited files after each write. On a repo with no index they start a detached background build and return immediately, so hook timeouts never kill a long first build.
+- Disk: the WAL is truncated after every sync (64 MB cap) and the large `export.cypher` / `snapshot.jsonl` snapshots are only written when you ask (`export`, `sync --export`, `ast_sync export:true`).
+- Repo-specific "did you mean" hints live in an optional `<repo>/ast-graph.config.json` (`{"aliases": {"OldName": ["newName"]}}`); suggestions are labelled and never returned as exact matches.
 
 ### Building from source
 
@@ -66,7 +86,7 @@ npm test
 ### Optional CLI usage
 
 ```bash
-# Index a repository
+# Index a repository (add --export to also write export.cypher / snapshot.jsonl)
 node ~/.gemini/config/plugins/ast-graph/dist/cli.js sync --workspace /path/to/repo
 
 # Look up a symbol, its blast radius, or covering tests

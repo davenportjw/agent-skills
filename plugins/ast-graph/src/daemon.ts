@@ -5,6 +5,7 @@ import { URL } from 'node:url';
 import { analyzeGraph, runBenchmark } from './analyzer.js';
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
+import { isPathInExcludedSubtree } from './repo-boundary.js';
 
 export interface SidecarDaemonOptions {
   workspaceRoot?: string;
@@ -41,10 +42,24 @@ export async function startSidecarDaemon(
 
   // Initial lazy/incremental sync on startup
   const startedAtMs = Date.now();
-  let lastSyncResult = indexer.lazySyncIfDirty();
+  let lastSyncResult: ReturnType<AstGraphIndexer['lazySyncIfDirty']>;
+  try {
+    lastSyncResult = indexer.lazySyncIfDirty();
+  } catch (err) {
+    // Another process is building the first index; serve what exists and resync on demand.
+    if (!String((err as Error)?.message ?? err).includes('INDEX_BUILDING')) throw err;
+    lastSyncResult = {
+      mode: 'noop',
+      durationMs: 0,
+      filesScanned: 0,
+      filesUpdated: 0,
+      filesDeleted: 0,
+      totals: db.getCounts(),
+    };
+  }
   let lastSyncAt = new Date().toISOString();
 
-  // Debounced fs.watch over packages/, apps/, tools/, infra/
+  // Debounced recursive fs.watch over the repo root (skips build output, nested repos, .worktrees, and non-indexable files)
   const watchers: fs.FSWatcher[] = [];
   const pendingFiles = new Set<string>();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,37 +82,39 @@ export async function startSidecarDaemon(
   };
 
   if (options.enableWatcher !== false) {
-    for (const subDir of ['packages', 'apps', 'tools', 'infra']) {
-      const targetDir = path.join(workspaceRoot, subDir);
-      if (!fs.existsSync(targetDir)) continue;
-      try {
-        const watcher = fs.watch(targetDir, { recursive: true }, (_eventType, filename) => {
-          if (!filename) return;
-          const relPath = `${subDir}/${filename.split(path.sep).join('/')}`;
-          if (
-            relPath.includes('/dist/') ||
-            relPath.includes('node_modules') ||
-            relPath.includes('.ast-graph')
-          ) {
-            return;
-          }
-          if (
-            relPath.endsWith('.ts') ||
-            relPath.endsWith('.mjs') ||
-            relPath.endsWith('.tf') ||
-            relPath.endsWith('.py')
-          ) {
-            pendingFiles.add(relPath);
-            if (debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(flushWatchedChanges, 150);
-          }
-        });
-        watchers.push(watcher);
-      } catch {
-        // Recursive fs.watch might not be supported on some virtual filesystems
-      }
+    // Watch the whole repo (not a hardcoded monorepo layout) and let the indexer's own adapters and
+    // repo-boundary rules decide what is indexable: nested worktrees/clones, node_modules, build
+    // output, and .ast-graph itself are ignored.
+    const isIndexable = (rel: string): boolean =>
+      [
+        indexer.tsAdapter,
+        indexer.tfAdapter,
+        indexer.pyAdapter,
+        indexer.goAdapter,
+        indexer.sqlAdapter,
+        indexer.webAdapter,
+        indexer.dockerAdapter,
+        indexer.contractAdapter,
+        indexer.rustAdapter,
+        indexer.polyglotAdapter,
+      ].some((a) => a.supportsFile(rel));
+    try {
+      const watcher = fs.watch(workspaceRoot, { recursive: true }, (_eventType, filename) => {
+        if (!filename) return;
+        const relPath = filename.split(path.sep).join('/');
+        if (/(^|\/)(dist|build|node_modules|\.git|\.ast-graph|\.worktrees)(\/|$)/.test(relPath)) return;
+        if (isPathInExcludedSubtree(path.join(workspaceRoot, relPath), workspaceRoot)) return;
+        if (!isIndexable(relPath)) return;
+        pendingFiles.add(relPath);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(flushWatchedChanges, 150);
+      });
+      watchers.push(watcher);
+    } catch {
+      // Recursive fs.watch might not be supported on some virtual filesystems
     }
   }
+
 
   const sendJson = (res: http.ServerResponse, status: number, payload: unknown): void => {
     const body = JSON.stringify(payload, null, 2);
@@ -153,7 +170,7 @@ export async function startSidecarDaemon(
         lastSyncResult = indexer.syncWorkspace({
           full,
           targetPaths: paths,
-          exportSnapshots: full,
+          exportSnapshots: Boolean(body.export),
         });
         lastSyncAt = new Date().toISOString();
         sendJson(res, 200, { ok: true, sync: lastSyncResult });

@@ -49,7 +49,8 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
 - `AstGraphDatabase.verifyRepoBinding()` validates `canonicalRoot` and `repoId` in the SQLite `meta` table on every connection. If the repo's *own* `<root>/.ast-graph/ast.db` was stamped for a different path (moved/renamed checkout or worktree), derived data is dropped and the DB is rebound and rebuilt; a database outside `<root>/.ast-graph/` that belongs to another repository still throws `[TAMPER_PROTECTION]`.
 - Nested checkouts (any subdirectory with its own `.git`: `.worktrees/*`, submodules, vendored clones) plus `node_modules`, `.git`, `.ast-graph` are never indexed into the parent; target a worktree with `workspace: "<worktree-path>"`.
 - One writer per repo across all processes (MCP sessions, hooks, daemon, CLI): `.ast-graph/sync.lock` holds `{pid, host, startedAt, heartbeatAt}`. Non-owners answer from the last committed index (`[index busy]` prefix); with no index yet they return `INDEX_BUILDING` (retry). Dead-PID locks are taken over immediately; live owners silent for 10 min are treated as hung.
-- WAL is checkpointed/truncated after every sync (`journal_size_limit` 64 MB). Snapshot exports (`export.cypher`, `snapshot.jsonl`) are written only for explicit CLI `sync`/`export` or `ast_sync full:true`.
+- WAL is checkpointed/truncated after every sync (`journal_size_limit` 64 MB). Snapshot exports (`export.cypher`, `snapshot.jsonl`) are opt-in only: CLI `export` / `sync --export`, or `ast_sync export:true`.
+- Hooks build a missing index in a detached background `sync --no-export` and return immediately; queries during that build return `INDEX_BUILDING` (retry shortly, don't fall back to grep).
 - Repo-specific query aliases live in a committed `<root>/ast-graph.config.json` (`{"aliases": {"oldName": ["newName"]}}`); they are never applied to exact lookups and are shown as labelled suggestions. The plugin has no built-in aliases.
 
 ---

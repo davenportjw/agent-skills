@@ -14,6 +14,12 @@ export interface HookInvocationOptions {
     useDaemon?: boolean;
     daemonHost?: string;
     daemonPort?: number;
+    /**
+     * How to build an index that does not exist yet. `inline` (library default) blocks until the
+     * cold build finishes; `background` (used by the hook entrypoint) spawns a detached `cli.js sync`
+     * so harness hook timeouts (10-20s) never kill a long first build of a large repo.
+     */
+    coldBuild?: 'inline' | 'background';
 }
 export interface ParsedHookInput {
     harness: HookHarnessFormat;

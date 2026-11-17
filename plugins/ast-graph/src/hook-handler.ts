@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { assessWorkspace, canonicalizeWorkspaceRoot, findEnclosingRepoRoot } from './assessor.js';
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
+import { activeLockOwner, syncLockPath } from './sync-lock.js';
 
 export type HookHarnessFormat = 'antigravity' | 'claude-code' | 'unknown';
 
@@ -25,6 +27,12 @@ export interface HookInvocationOptions {
   useDaemon?: boolean;
   daemonHost?: string;
   daemonPort?: number;
+  /**
+   * How to build an index that does not exist yet. `inline` (library default) blocks until the
+   * cold build finishes; `background` (used by the hook entrypoint) spawns a detached `cli.js sync`
+   * so harness hook timeouts (10-20s) never kill a long first build of a large repo.
+   */
+  coldBuild?: 'inline' | 'background';
 }
 
 export interface ParsedHookInput {
@@ -157,6 +165,65 @@ async function tryPingDaemonSync(
   });
 }
 
+function resolveCliEntrypoint(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [path.join(here, 'cli.js'), path.join(here, '..', 'dist', 'cli.js')]) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Start a detached cold build unless another process already owns the repo's sync lock. */
+function spawnBackgroundBuild(wsRoot: string, dbPath: string): boolean {
+  if (activeLockOwner(syncLockPath(dbPath))) return true; // someone is already building it
+  const cli = resolveCliEntrypoint();
+  if (!cli) return false;
+  try {
+    const child = spawn(
+      process.execPath,
+      ['--no-warnings', cli, 'sync', '--no-export', '--workspace', wsRoot, '--db', dbPath],
+      { cwd: wsRoot, detached: true, stdio: 'ignore' },
+    );
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run one repo sync from a hook. Hooks must never fail or stall the harness: a cold index is built
+ * in the background (when requested), and lock contention / INDEX_BUILDING are treated as no-ops
+ * because the lock owner is already bringing the index up to date.
+ */
+function runHookSync(
+  wsRoot: string,
+  dbPath: string,
+  coldBuild: 'inline' | 'background',
+  work: (indexer: AstGraphIndexer, db: AstGraphDatabase) => number,
+): number {
+  assessWorkspace(wsRoot);
+  const db = new AstGraphDatabase(dbPath);
+  try {
+    const indexer = new AstGraphIndexer(wsRoot, db);
+    if (coldBuild === 'background' && db.getCounts().files === 0) {
+      db.close();
+      spawnBackgroundBuild(wsRoot, dbPath);
+      return 0;
+    }
+    return work(indexer, db);
+  } catch (err) {
+    if (String((err as Error)?.message ?? err).includes('INDEX_BUILDING')) return 0;
+    throw err;
+  } finally {
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
+  }
+}
+
 /**
  * Executes a hook invocation for either `session-start` or `post-tool-use` and returns
  * the harness-compatible stdout JSON response alongside timing telemetry.
@@ -170,6 +237,7 @@ export async function handleHookInvocation(
   const parsed = parseHookInput(eventTypeArg, rawStdinJson);
   const fallbackRoot = canonicalizeWorkspaceRoot(options?.workspaceRoot ?? process.cwd());
   const lowerEvent = parsed.eventType.toLowerCase();
+  const coldBuild = options?.coldBuild ?? 'inline';
 
   let filesUpdated = 0;
   const resolvedWorkspaces: string[] = [];
@@ -208,15 +276,7 @@ export async function handleHookInvocation(
           : false;
 
       if (!daemonHandled) {
-        assessWorkspace(wsRoot);
-        const db = new AstGraphDatabase(dbPath);
-        try {
-          const indexer = new AstGraphIndexer(wsRoot, db);
-          const result = indexer.lazySyncIfDirty();
-          filesUpdated += result.filesUpdated;
-        } finally {
-          db.close();
-        }
+        filesUpdated += runHookSync(wsRoot, dbPath, coldBuild, (indexer) => indexer.lazySyncIfDirty().filesUpdated);
       }
     }
   } else {
@@ -249,22 +309,13 @@ export async function handleHookInvocation(
       if (daemonHandled) {
         filesUpdated = 1;
       } else {
-        assessWorkspace(wsRoot);
-        const db = new AstGraphDatabase(dbPath);
-        try {
-          const indexer = new AstGraphIndexer(wsRoot, db);
-          const counts = db.getCounts();
-          if (counts.files === 0) {
+        filesUpdated = runHookSync(wsRoot, dbPath, coldBuild, (indexer, db) => {
+          if (db.getCounts().files === 0) {
             indexer.syncWorkspace({ full: true });
           }
-          const delta = indexer.syncWorkspace({
-            full: false,
-            targetPaths: [absTarget],
-          });
-          filesUpdated = delta.filesUpdated + delta.filesDeleted;
-        } finally {
-          db.close();
-        }
+          const delta = indexer.syncWorkspace({ full: false, targetPaths: [absTarget] });
+          return delta.filesUpdated + delta.filesDeleted;
+        });
       }
     } else {
       const wsRoot = options?.workspaceRoot
@@ -273,15 +324,10 @@ export async function handleHookInvocation(
       resolvedWorkspaces.push(wsRoot);
       const dbPath =
         options?.dbPath ?? path.join(wsRoot, '.ast-graph', 'ast.db');
-      assessWorkspace(wsRoot);
-      const db = new AstGraphDatabase(dbPath);
-      try {
-        const indexer = new AstGraphIndexer(wsRoot, db);
+      filesUpdated = runHookSync(wsRoot, dbPath, coldBuild, (indexer) => {
         const delta = indexer.lazySyncIfDirty();
-        filesUpdated = delta.filesUpdated + delta.filesDeleted;
-      } finally {
-        db.close();
-      }
+        return delta.filesUpdated + delta.filesDeleted;
+      });
     }
   }
 
@@ -351,11 +397,13 @@ const isMain = (() => {
 if (isMain) {
   const eventArg = process.argv[2] ?? 'post-tool-use';
   readStdin()
-    .then((rawStdin) => handleHookInvocation(eventArg, rawStdin))
+    .then((rawStdin) => handleHookInvocation(eventArg, rawStdin, { coldBuild: 'background' }))
     .then((result) => {
       process.stdout.write(`${JSON.stringify(result.stdoutJson)}\n`);
     })
     .catch(() => {
-      process.stdout.write('{}\n');
+      // Never block the harness on an indexing failure; queries will surface real errors.
+      const claude = Boolean(process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR);
+      process.stdout.write(claude ? '{"continue":true}\n' : '{}\n');
     });
 }

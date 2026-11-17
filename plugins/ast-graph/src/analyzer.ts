@@ -452,7 +452,7 @@ export function runBenchmark(
   indexer: AstGraphIndexer,
 ): BenchmarkReport {
   // 1. Cold full sync measurement
-  const coldSync = indexer.syncWorkspace({ full: true, exportSnapshots: true });
+  const coldSync = indexer.syncWorkspace({ full: true, exportSnapshots: false });
   const coldSyncMs = round2(coldSync.durationMs);
   const filesPerSec = coldSyncMs > 0 ? round2((coldSync.filesUpdated / coldSyncMs) * 1000) : 0;
   const nodesPerSec = coldSyncMs > 0 ? round2((coldSync.totals.nodes / coldSyncMs) * 1000) : 0;

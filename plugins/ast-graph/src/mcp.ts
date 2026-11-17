@@ -434,6 +434,7 @@ export const MCP_TOOLS_MANIFEST = [
       type: 'object',
       properties: {
         full: { type: 'boolean', description: 'Force full re-index (default: false)' },
+        export: { type: 'boolean', description: 'Also write export.cypher + snapshot.jsonl next to ast.db (default: false; large on big repos)' },
         paths: {
           type: 'array',
           items: { type: 'string' },
@@ -1036,7 +1037,7 @@ export class AstMcpServer {
               ...indexer.syncWorkspace({
                 full,
                 targetPaths: paths,
-                exportSnapshots: full,
+                exportSnapshots: Boolean(args.export),
               }),
             };
             break;

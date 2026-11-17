@@ -997,7 +997,7 @@ export async function executeCliCommand(
       const force = rawArgs.includes('--force') || rawArgs.includes('--full');
       const syncResult = indexer.syncWorkspace({
         full: force || db.getCounts().files === 0,
-        exportSnapshots: true,
+        exportSnapshots: rawArgs.includes('--export') && !rawArgs.includes('--no-export'),
       });
       const counts = db.getCounts();
       const data = { sync: syncResult, counts };

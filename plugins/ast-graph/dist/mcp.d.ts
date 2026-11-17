@@ -324,6 +324,10 @@ export declare const MCP_TOOLS_MANIFEST: readonly [{
                 readonly type: "boolean";
                 readonly description: "Force full re-index (default: false)";
             };
+            readonly export: {
+                readonly type: "boolean";
+                readonly description: "Also write export.cypher + snapshot.jsonl next to ast.db (default: false; large on big repos)";
+            };
             readonly paths: {
                 readonly type: "array";
                 readonly items: {
