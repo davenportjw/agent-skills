@@ -368,6 +368,7 @@ export declare class AstMcpServer {
     setClientRoots(uris: string[]): void;
     private requestClientRoots;
     private noWorkspaceMessage;
+    evictStaleHandles(now?: number, idleMs?: number): number;
     private getOrOpenWorkspace;
     private getCandidateWorkspaceRoots;
     private resolveWorkspaceHandle;

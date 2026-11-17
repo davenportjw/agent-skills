@@ -89,6 +89,103 @@ export function findEnclosingRepoRoot(targetPath: string): string | null {
   return null;
 }
 
+export interface GitWorkspaceInfo {
+  gitDir: string;
+  commonDir: string;
+  isWorktree: boolean;
+  parentRepoRoot: string | null;
+}
+
+/**
+ * Resolves `.git` directory metadata for both standard checkouts (`.git/` dir)
+ * and linked Git worktrees / submodules (`.git` pointer file with `gitdir:` + `commondir`).
+ */
+export function resolveGitInfo(workspaceRoot: string): GitWorkspaceInfo | null {
+  const canonicalRoot = canonicalizeWorkspaceRoot(workspaceRoot);
+  const dotGit = path.join(canonicalRoot, '.git');
+  try {
+    if (!fs.existsSync(dotGit)) return null;
+    const st = fs.statSync(dotGit);
+    if (st.isDirectory()) {
+      return {
+        gitDir: dotGit,
+        commonDir: dotGit,
+        isWorktree: false,
+        parentRepoRoot: null,
+      };
+    }
+    if (!st.isFile()) return null;
+    const raw = fs.readFileSync(dotGit, 'utf8').trim();
+    const match = /^gitdir:\s*(.+)$/im.exec(raw);
+    if (!match?.[1]) return null;
+    const gitDir = canonicalizeWorkspaceRoot(path.resolve(canonicalRoot, match[1].trim()));
+    let commonDir = gitDir;
+    const commonDirFile = path.join(gitDir, 'commondir');
+    if (fs.existsSync(commonDirFile)) {
+      const relCommon = fs.readFileSync(commonDirFile, 'utf8').trim();
+      if (relCommon) {
+        commonDir = canonicalizeWorkspaceRoot(path.resolve(gitDir, relCommon));
+      }
+    }
+    let parentRepoRoot: string | null = null;
+    if (path.basename(commonDir) === '.git') {
+      const candidateParent = canonicalizeWorkspaceRoot(path.dirname(commonDir));
+      if (candidateParent !== canonicalRoot && fs.existsSync(candidateParent)) {
+        parentRepoRoot = candidateParent;
+      }
+    }
+    return {
+      gitDir,
+      commonDir,
+      isWorktree: commonDir !== gitDir,
+      parentRepoRoot,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the current Git HEAD state (`<ref>:<sha>` or `detached:<sha>`) directly from `.git`
+ * without spawning a subprocess (<0.1ms), supporting linked worktrees and `packed-refs`.
+ */
+export function resolveGitHeadSignature(workspaceRoot: string): string | null {
+  const info = resolveGitInfo(workspaceRoot);
+  if (!info) return null;
+  try {
+    const headPath = path.join(info.gitDir, 'HEAD');
+    if (!fs.existsSync(headPath)) return null;
+    const headRaw = fs.readFileSync(headPath, 'utf8').trim();
+    if (!headRaw) return null;
+    const refMatch = /^ref:\s*(.+)$/i.exec(headRaw);
+    if (!refMatch?.[1]) {
+      return `detached:${headRaw}`;
+    }
+    const refName = refMatch[1].trim();
+    for (const base of [info.gitDir, info.commonDir]) {
+      const looseRef = path.join(base, refName);
+      if (fs.existsSync(looseRef) && fs.statSync(looseRef).isFile()) {
+        const sha = fs.readFileSync(looseRef, 'utf8').trim();
+        if (sha) return `${refName}:${sha}`;
+      }
+    }
+    const packedRefsPath = path.join(info.commonDir, 'packed-refs');
+    if (fs.existsSync(packedRefsPath)) {
+      const packed = fs.readFileSync(packedRefsPath, 'utf8');
+      for (const line of packed.split(/\r?\n/)) {
+        if (!line || line.startsWith('#') || line.startsWith('^')) continue;
+        const spaceIdx = line.indexOf(' ');
+        if (spaceIdx > 0 && line.slice(spaceIdx + 1).trim() === refName) {
+          return `${refName}:${line.slice(0, spaceIdx).trim()}`;
+        }
+      }
+    }
+    return `${refName}:unborn`;
+  } catch {
+    return null;
+  }
+}
+
 export function ensureGitExclude(canonicalRoot: string): boolean {
   const astDir = path.join(canonicalRoot, '.ast-graph');
   try {
@@ -101,23 +198,28 @@ export function ensureGitExclude(canonicalRoot: string): boolean {
     // ignore if read-only
   }
 
-  const gitDir = path.join(canonicalRoot, '.git');
+  const gitInfo = resolveGitInfo(canonicalRoot);
+  if (!gitInfo) {
+    return false;
+  }
   try {
-    if (!fs.existsSync(gitDir) || !fs.statSync(gitDir).isDirectory()) {
-      return false;
-    }
-    const infoDir = path.join(gitDir, 'info');
+    const infoDir = path.join(gitInfo.commonDir, 'info');
     fs.mkdirSync(infoDir, { recursive: true });
     const excludePath = path.join(infoDir, 'exclude');
     const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : '';
     const lines = existing.split(/\r?\n/).map((l) => l.trim());
-    if (lines.includes('.ast-graph') || lines.includes('.ast-graph/')) {
+    const additions: string[] = [];
+    if (!lines.includes('.ast-graph') && !lines.includes('.ast-graph/')) {
+      additions.push('# AST GraphDB per-repository index\n.ast-graph/');
+    }
+    if (gitInfo.isWorktree && !lines.includes('.worktrees') && !lines.includes('.worktrees/')) {
+      additions.push('# Git worktrees\n.worktrees/');
+    }
+    if (additions.length === 0) {
       return false;
     }
-    const suffix =
-      (existing.endsWith('\n') || existing.length === 0 ? '' : '\n') +
-      '# AST GraphDB per-repository index\n.ast-graph/\n';
-    fs.writeFileSync(excludePath, existing + suffix, 'utf8');
+    const prefix = existing.endsWith('\n') || existing.length === 0 ? '' : '\n';
+    fs.writeFileSync(excludePath, `${existing}${prefix}${additions.join('\n')}\n`, 'utf8');
     return true;
   } catch {
     return false;
@@ -131,28 +233,127 @@ export function getGlobalRegistryPath(): string {
   return path.join(os.homedir(), '.gemini', 'config', 'ast-graph-workspaces.json');
 }
 
+function isEphemeralTempWorkspace(rootPath: string): boolean {
+  const normalized = rootPath.replace(/\\/g, '/');
+  if (
+    normalized.startsWith('/tmp/') ||
+    normalized.startsWith('/private/tmp/') ||
+    normalized.startsWith('/var/folders/') ||
+    normalized.startsWith('/private/var/folders/')
+  ) {
+    return true;
+  }
+  const sysTmp = canonicalizeWorkspaceRoot(os.tmpdir()).replace(/\\/g, '/');
+  return Boolean(sysTmp && (normalized === sysTmp || normalized.startsWith(`${sysTmp}/`)));
+}
+
+function isLiveRegistryWorkspace(rootPath: string, allowEphemeral: boolean): boolean {
+  if (!allowEphemeral && isEphemeralTempWorkspace(rootPath)) {
+    return false;
+  }
+  try {
+    return fs.existsSync(rootPath) && fs.statSync(rootPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function registerWorkspaceInGlobalRegistry(manifest: ProjectAssessmentManifest): void {
+  const hasExplicitRegistry = Boolean(process.env.AST_GRAPH_REGISTRY_PATH);
+  if (!hasExplicitRegistry && isEphemeralTempWorkspace(manifest.canonicalRoot)) {
+    return;
+  }
   const regPath = getGlobalRegistryPath();
   try {
     fs.mkdirSync(path.dirname(regPath), { recursive: true });
-    let data: { workspaces: Record<string, ProjectAssessmentManifest> } = { workspaces: {} };
+    const cleaned: Record<string, ProjectAssessmentManifest> = {};
     if (fs.existsSync(regPath)) {
       try {
         const parsed = JSON.parse(fs.readFileSync(regPath, 'utf8')) as {
           workspaces?: Record<string, ProjectAssessmentManifest>;
         };
         if (parsed && typeof parsed.workspaces === 'object' && parsed.workspaces) {
-          data.workspaces = parsed.workspaces;
+          for (const [rootKey, entry] of Object.entries(parsed.workspaces)) {
+            const candidate = entry?.canonicalRoot ?? rootKey;
+            if (isLiveRegistryWorkspace(candidate, hasExplicitRegistry)) {
+              cleaned[candidate] = entry;
+            }
+          }
         }
       } catch {
-        data = { workspaces: {} };
+        // reset malformed registry
       }
     }
-    data.workspaces[manifest.canonicalRoot] = manifest;
-    fs.writeFileSync(regPath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    if (isLiveRegistryWorkspace(manifest.canonicalRoot, hasExplicitRegistry)) {
+      cleaned[manifest.canonicalRoot] = manifest;
+    }
+    fs.writeFileSync(regPath, JSON.stringify({ workspaces: cleaned }, null, 2) + '\n', 'utf8');
   } catch {
     // Non-fatal if home config dir is read-only
   }
+}
+
+export function unregisterWorkspaceFromGlobalRegistry(workspaceRoot: string): boolean {
+  const regPath = getGlobalRegistryPath();
+  if (!fs.existsSync(regPath)) return false;
+  const canonical = canonicalizeWorkspaceRoot(workspaceRoot);
+  const rawResolved = path.resolve(workspaceRoot);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(regPath, 'utf8')) as {
+      workspaces?: Record<string, ProjectAssessmentManifest>;
+    };
+    if (!parsed?.workspaces) return false;
+    const hasExplicitRegistry = Boolean(process.env.AST_GRAPH_REGISTRY_PATH);
+    let removed = false;
+    const next: Record<string, ProjectAssessmentManifest> = {};
+    for (const [key, entry] of Object.entries(parsed.workspaces)) {
+      if (key === canonical || key === rawResolved || entry?.canonicalRoot === canonical || entry?.canonicalRoot === rawResolved) {
+        removed = true;
+        continue;
+      }
+      if (!isLiveRegistryWorkspace(entry?.canonicalRoot ?? key, hasExplicitRegistry)) {
+        removed = true;
+        continue;
+      }
+      next[key] = entry;
+    }
+    if (removed) {
+      fs.writeFileSync(regPath, JSON.stringify({ workspaces: next }, null, 2) + '\n', 'utf8');
+    }
+    return removed;
+  } catch {
+    return false;
+  }
+}
+
+export function pruneGlobalRegistry(): { removed: string[]; kept: string[] } {
+  const regPath = getGlobalRegistryPath();
+  if (!fs.existsSync(regPath)) return { removed: [], kept: [] };
+  const hasExplicitRegistry = Boolean(process.env.AST_GRAPH_REGISTRY_PATH);
+  const removed: string[] = [];
+  const kept: string[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(regPath, 'utf8')) as {
+      workspaces?: Record<string, ProjectAssessmentManifest>;
+    };
+    if (!parsed?.workspaces) return { removed, kept };
+    const next: Record<string, ProjectAssessmentManifest> = {};
+    for (const [key, entry] of Object.entries(parsed.workspaces)) {
+      const rootPath = entry?.canonicalRoot ?? key;
+      if (isLiveRegistryWorkspace(rootPath, hasExplicitRegistry)) {
+        next[rootPath] = entry;
+        kept.push(rootPath);
+      } else {
+        removed.push(rootPath);
+      }
+    }
+    if (removed.length > 0) {
+      fs.writeFileSync(regPath, JSON.stringify({ workspaces: next }, null, 2) + '\n', 'utf8');
+    }
+  } catch {
+    // ignore read/write errors
+  }
+  return { removed, kept };
 }
 
 export function getRegisteredWorkspaces(): ProjectAssessmentManifest[] {

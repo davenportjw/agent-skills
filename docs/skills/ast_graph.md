@@ -71,8 +71,8 @@ args = ["--no-warnings", "/Users/<you>/.gemini/config/plugins/ast-graph/dist/mcp
 - Repo boundaries: nested git checkouts (`.worktrees/*`, submodules, vendored clones) are never indexed into the parent. Query them with `workspace: "<path>"`; they get their own index.
 - Moved or renamed checkouts are rebound automatically instead of failing a tamper check.
 - Single writer: `.ast-graph/sync.lock` (PID + heartbeat) lets Claude Code, Antigravity, Codex, hooks, and CLI runs share one repo index. Non-owners answer from the last committed index (`[index busy]`); with no index yet they return `INDEX_BUILDING`.
-- Hooks (Antigravity and Claude Code) re-index edited files after each write. On a repo with no index they start a detached background build and return immediately, so hook timeouts never kill a long first build.
-- Disk: the WAL is truncated after every sync (64 MB cap) and the large `export.cypher` / `snapshot.jsonl` snapshots are only written when you ask (`export`, `sync --export`, `ast_sync export:true`).
+- Hooks (Antigravity and Claude Code) re-index edited files after each write and watch Git lifecycle commands (`worktree add/remove/prune`, `switch/checkout/pull/merge/rebase/reset`, `init/clone`). New `.worktrees/<slug>` checkouts seed from the parent repo's `ast.db` in ~10 ms, `last_git_head` keeps branch switches in sync, and `PreToolUse` removes `<worktree>/.ast-graph` before `git worktree remove` so non-`--force` removals succeed cleanly while preserving dirty-file checks.
+- Disk: the WAL is truncated after every sync (64 MB cap), SQLite freelist churn auto-vacuums above 16 MB / 25%, deleted checkouts auto-prune from `ast-graph-workspaces.json`, and the large `export.cypher` / `snapshot.jsonl` snapshots are only written when you ask (`export`, `sync --export`, `ast_sync export:true`).
 - Repo-specific "did you mean" hints live in an optional `<repo>/ast-graph.config.json` (`{"aliases": {"OldName": ["newName"]}}`); suggestions are labelled and never returned as exact matches.
 
 ### Building from source

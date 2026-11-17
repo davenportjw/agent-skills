@@ -50,6 +50,12 @@ export declare class AstGraphIndexer {
      * Fast (<3ms) check comparing filesystem mtimeMs and SHA-256 against tracked files in SQLite.
      * Automatically incrementally re-indexes any modified/added/deleted files.
      */
+    /**
+     * When opening a newly created Git worktree whose index is still empty, seed its `ast.db` from
+     * the parent repository's index (~10ms) so the worktree avoids a multi-second cold parse.
+     */
+    private trySeedWorktreeFromParent;
+    private refreshTrackedMtimes;
     lazySyncIfDirty(options?: {
         targetFileHint?: string;
     }): SyncResult;

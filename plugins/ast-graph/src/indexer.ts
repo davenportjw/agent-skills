@@ -13,7 +13,12 @@ import { SqlCompilerAdapter } from './adapters/sql-adapter.js';
 import { TerraformCompilerAdapter } from './adapters/terraform-adapter.js';
 import { TypeScriptCompilerAdapter, isPublicMember } from './adapters/ts-adapter.js';
 import { WebCompilerAdapter } from './adapters/web-adapter.js';
-import { assessWorkspace, canonicalizeWorkspaceRoot } from './assessor.js';
+import {
+  assessWorkspace,
+  canonicalizeWorkspaceRoot,
+  resolveGitHeadSignature,
+  resolveGitInfo,
+} from './assessor.js';
 import type { AstGraphDatabase } from './db.js';
 import { isPathInExcludedSubtree } from './repo-boundary.js';
 import { activeLockOwner, syncLockPath, tryAcquireSyncLock, type SyncLockInfo } from './sync-lock.js';
@@ -112,9 +117,52 @@ export class AstGraphIndexer {
    * Fast (<3ms) check comparing filesystem mtimeMs and SHA-256 against tracked files in SQLite.
    * Automatically incrementally re-indexes any modified/added/deleted files.
    */
+  /**
+   * When opening a newly created Git worktree whose index is still empty, seed its `ast.db` from
+   * the parent repository's index (~10ms) so the worktree avoids a multi-second cold parse.
+   */
+  private trySeedWorktreeFromParent(): boolean {
+    if (this.db.dbPath === ':memory:' || this.db.getCounts().files > 0) return false;
+    const gitInfo = resolveGitInfo(this.workspaceRoot);
+    if (!gitInfo?.isWorktree || !gitInfo.parentRepoRoot) return false;
+    const parentDbPath = path.join(gitInfo.parentRepoRoot, '.ast-graph', 'ast.db');
+    if (!fs.existsSync(parentDbPath)) return false;
+
+    const lock = tryAcquireSyncLock(this.db.dbPath);
+    if (!lock) return false;
+    try {
+      assessWorkspace(this.workspaceRoot);
+      return this.db.seedFromParentDatabase(parentDbPath, this.workspaceRoot);
+    } finally {
+      lock.release();
+    }
+  }
+
+  private refreshTrackedMtimes(updates: Array<{ relPath: string; mtimeMs: number }>): void {
+    if (updates.length === 0) return;
+    try {
+      const stmt = this.db.db.prepare('UPDATE files SET mtime_ms = ? WHERE file_path = ?');
+      this.db.db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const u of updates) {
+          stmt.run(u.mtimeMs, u.relPath);
+        }
+        this.db.db.exec('COMMIT');
+      } catch {
+        try {
+          this.db.db.exec('ROLLBACK');
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
   public lazySyncIfDirty(options?: { targetFileHint?: string }): SyncResult {
     const t0 = performance.now();
-    const tracked = this.db.getTrackedFilesMap();
+    let tracked = this.db.getTrackedFilesMap();
     const owner = activeLockOwner(syncLockPath(this.db.dbPath));
     if (owner && owner.pid !== process.pid) {
       // Another session/hook/daemon is indexing this repo: serve the last committed index instead of
@@ -128,11 +176,21 @@ export class AstGraphIndexer {
       return this.busyResult(t0, owner);
     }
     if (tracked.size === 0) {
-      return this.syncWorkspace({ full: true });
+      if (this.trySeedWorktreeFromParent()) {
+        tracked = this.db.getTrackedFilesMap();
+      }
+      if (tracked.size === 0) {
+        return this.syncWorkspace({ full: true });
+      }
     }
 
-    // Fast path for target-scoped queries (e.g., outline <file>): only stat/sync the requested file if tracked
-    if (options?.targetFileHint) {
+    const currentHead = resolveGitHeadSignature(this.workspaceRoot);
+    const storedHead = this.db.getMeta('last_git_head');
+    const headChanged = Boolean(currentHead && currentHead !== storedHead);
+
+    // Fast path for target-scoped queries (e.g., outline <file>): only stat/sync the requested file
+    // when Git HEAD has not changed since the last sync (branch switches / pulls must scan the repo).
+    if (options?.targetFileHint && !headChanged) {
       const cleanHint = options.targetFileHint.replace(/\\/g, '/').replace(/^\.\//, '');
       let matchedRel: string | null = null;
       if (tracked.has(cleanHint)) {
@@ -174,6 +232,7 @@ export class AstGraphIndexer {
     const candidates = this.discoverAllCandidateFiles();
     const currentRelSet = new Set<string>();
     const dirtyRelPaths: string[] = [];
+    const mtimeUpdates: Array<{ relPath: string; mtimeMs: number }> = [];
 
     for (const absPath of candidates) {
       const relPath = this.normalizeRelPath(absPath);
@@ -181,11 +240,13 @@ export class AstGraphIndexer {
       const prev = tracked.get(relPath);
       try {
         const stat = fs.statSync(absPath);
-        if (!prev || Math.abs(stat.mtimeMs - prev.mtimeMs) > 1) {
+        if (!prev || headChanged || Math.abs(stat.mtimeMs - prev.mtimeMs) > 1) {
           const content = fs.readFileSync(absPath, 'utf8');
           const sha256 = crypto.createHash('sha256').update(content).digest('hex');
           if (!prev || sha256 !== prev.sha256) {
             dirtyRelPaths.push(relPath);
+          } else if (Math.abs(stat.mtimeMs - prev.mtimeMs) > 1) {
+            mtimeUpdates.push({ relPath, mtimeMs: stat.mtimeMs });
           }
         }
       } catch {
@@ -193,8 +254,30 @@ export class AstGraphIndexer {
       }
     }
 
-    const deletedCount = this.db.removeDeletedFiles(currentRelSet);
-    if (dirtyRelPaths.length === 0 && deletedCount === 0) {
+    let hasMissingTracked = false;
+    for (const trackedRel of tracked.keys()) {
+      if (!currentRelSet.has(trackedRel)) {
+        hasMissingTracked = true;
+        break;
+      }
+    }
+
+    if (dirtyRelPaths.length > 0) {
+      if (hasMissingTracked || mtimeUpdates.length > 0) {
+        const preLock = tryAcquireSyncLock(this.db.dbPath);
+        if (preLock) {
+          try {
+            if (hasMissingTracked) this.db.removeDeletedFiles(currentRelSet);
+            if (mtimeUpdates.length > 0) this.refreshTrackedMtimes(mtimeUpdates);
+          } finally {
+            preLock.release();
+          }
+        }
+      }
+      return this.syncWorkspace({ full: false, targetPaths: dirtyRelPaths });
+    }
+
+    if (!hasMissingTracked && mtimeUpdates.length === 0 && !headChanged) {
       return {
         mode: 'noop',
         durationMs: performance.now() - t0,
@@ -205,20 +288,38 @@ export class AstGraphIndexer {
       };
     }
 
-    if (dirtyRelPaths.length > 0) {
-      return this.syncWorkspace({ full: false, targetPaths: dirtyRelPaths });
+    let deletedCount = 0;
+    const metaLock = tryAcquireSyncLock(this.db.dbPath);
+    if (metaLock) {
+      try {
+        if (hasMissingTracked) {
+          deletedCount = this.db.removeDeletedFiles(currentRelSet);
+        }
+        if (mtimeUpdates.length > 0) {
+          this.refreshTrackedMtimes(mtimeUpdates);
+        }
+        if (currentHead) {
+          this.db.setMeta('last_git_head', currentHead);
+        }
+        if (deletedCount > 0) {
+          const durationMs = performance.now() - t0;
+          this.db.recordSyncRun({
+            durationMs,
+            mode: 'incremental',
+            filesScanned: candidates.length,
+            filesUpdated: 0,
+          });
+          this.db.compactIfNeeded();
+        }
+        this.db.checkpointWal();
+      } finally {
+        metaLock.release();
+      }
     }
 
-    const durationMs = performance.now() - t0;
-    this.db.recordSyncRun({
-      durationMs,
-      mode: 'incremental',
-      filesScanned: candidates.length,
-      filesUpdated: 0,
-    });
     return {
-      mode: 'incremental',
-      durationMs,
+      mode: deletedCount > 0 ? 'incremental' : 'noop',
+      durationMs: performance.now() - t0,
       filesScanned: candidates.length,
       filesUpdated: 0,
       filesDeleted: deletedCount,
@@ -245,7 +346,13 @@ export class AstGraphIndexer {
     exportSnapshots?: boolean;
   } = {}): SyncResult {
     const t0 = performance.now();
-    const tracked = this.db.getTrackedFilesMap();
+    let tracked = this.db.getTrackedFilesMap();
+    if (tracked.size === 0 && !options.full && !options.force && (!options.targetPaths || options.targetPaths.length === 0)) {
+      if (this.trySeedWorktreeFromParent()) {
+        return this.lazySyncIfDirty();
+      }
+      tracked = this.db.getTrackedFilesMap();
+    }
     const isCold = tracked.size === 0 || Boolean(options.full);
     const lock = tryAcquireSyncLock(this.db.dbPath);
     if (!lock) {
@@ -354,12 +461,17 @@ export class AstGraphIndexer {
           contractBatch.files.length +
           rustBatch.files.length +
           polyglotBatch.files.length;
+        const headSig = resolveGitHeadSignature(this.workspaceRoot);
+        if (headSig) {
+          this.db.setMeta('last_git_head', headSig);
+        }
         this.db.recordSyncRun({
           durationMs,
           mode: 'full',
           filesScanned: candidates.length,
           filesUpdated: updatedCount,
         });
+        this.db.compactIfNeeded();
 
         return {
           mode: 'full',
@@ -525,6 +637,10 @@ export class AstGraphIndexer {
         this.db.exportGraph(path.dirname(this.db.dbPath));
       }
 
+      const headSig = resolveGitHeadSignature(this.workspaceRoot);
+      if (headSig) {
+        this.db.setMeta('last_git_head', headSig);
+      }
       const durationMs = performance.now() - t0;
       this.db.recordSyncRun({
         durationMs,
@@ -532,6 +648,7 @@ export class AstGraphIndexer {
         filesScanned: rawTargets.length,
         filesUpdated,
       });
+      this.db.compactIfNeeded();
 
       return {
         mode: filesUpdated > 0 || deletedCount > 0 ? 'incremental' : 'noop',

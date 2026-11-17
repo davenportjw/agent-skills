@@ -374,6 +374,7 @@ export const MCP_TOOLS_MANIFEST = [
         },
     },
 ];
+const WORKTREE_HANDLE_IDLE_MS = 10 * 60 * 1000;
 export class AstMcpServer {
     /** Directory the server was launched for (cwd / --workspace / AST_GRAPH_WORKSPACE). */
     workspaceRoot;
@@ -458,26 +459,95 @@ export class AstMcpServer {
             `Pass \`workspace: "<repo-name-or-absolute-path>"\` (or an absolute file path).` +
             (list ? `\nKnown repositories:\n${list}` : '\nNo repositories are registered yet; pass an absolute path to index one.'));
     }
+    evictStaleHandles(now = Date.now(), idleMs = WORKTREE_HANDLE_IDLE_MS) {
+        let evicted = 0;
+        for (const [key, handle] of this.pool.entries()) {
+            if (handle.db.isClosed) {
+                this.pool.delete(key);
+                evicted += 1;
+                continue;
+            }
+            if (handle.dbFilePath === ':memory:') {
+                if (!fs.existsSync(handle.workspaceRoot)) {
+                    handle.db.close();
+                    this.pool.delete(key);
+                    evicted += 1;
+                }
+                continue;
+            }
+            let stale = !fs.existsSync(handle.workspaceRoot) || !fs.existsSync(handle.dbFilePath);
+            if (!stale && handle.dbInode !== null) {
+                try {
+                    stale = fs.statSync(handle.dbFilePath).ino !== handle.dbInode;
+                }
+                catch {
+                    stale = true;
+                }
+            }
+            if (!stale && handle.isWorktree && now - handle.lastAccessedAt > idleMs) {
+                stale = true;
+            }
+            if (stale) {
+                try {
+                    handle.db.close();
+                }
+                catch {
+                    // ignore close errors
+                }
+                this.pool.delete(key);
+                evicted += 1;
+            }
+        }
+        return evicted;
+    }
     getOrOpenWorkspace(rawWorkspace, explicitDbPath) {
+        this.evictStaleHandles();
         const repoRoot = findEnclosingRepoRoot(rawWorkspace) ?? canonicalizeWorkspaceRoot(rawWorkspace);
         const key = explicitDbPath ? `${repoRoot}::${explicitDbPath}` : repoRoot;
         const existing = this.pool.get(key);
         if (existing) {
+            existing.lastAccessedAt = Date.now();
             return existing;
         }
-        const resolvedDb = explicitDbPath ?? path.join(repoRoot, '.ast-graph', 'ast.db');
+        const resolvedDb = explicitDbPath === ':memory:'
+            ? ':memory:'
+            : explicitDbPath ?? path.join(repoRoot, '.ast-graph', 'ast.db');
         const db = new AstGraphDatabase(resolvedDb);
         const indexer = new AstGraphIndexer(repoRoot, db);
+        let dbInode = null;
+        if (db.dbPath !== ':memory:') {
+            try {
+                dbInode = fs.statSync(db.dbPath).ino;
+            }
+            catch {
+                dbInode = null;
+            }
+        }
+        let isWorktree = repoRoot.replace(/\\/g, '/').includes('/.worktrees/');
+        if (!isWorktree) {
+            try {
+                const dotGit = path.join(repoRoot, '.git');
+                isWorktree = fs.existsSync(dotGit) && fs.statSync(dotGit).isFile();
+            }
+            catch {
+                isWorktree = false;
+            }
+        }
         const handle = {
             workspaceRoot: repoRoot,
             repoId: computeRepoId(repoRoot),
             db,
             indexer,
+            dbFilePath: db.dbPath,
+            dbInode,
+            isWorktree,
+            lastAccessedAt: Date.now(),
         };
         this.pool.set(key, handle);
         return handle;
     }
     getCandidateWorkspaceRoots() {
+        this.evictStaleHandles();
         const candidates = [];
         const seen = new Set();
         const addCandidate = (dir) => {

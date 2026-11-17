@@ -4,7 +4,13 @@ import path from 'node:path';
 import http from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
-import { assessWorkspace, canonicalizeWorkspaceRoot, findEnclosingRepoRoot } from './assessor.js';
+import {
+  assessWorkspace,
+  canonicalizeWorkspaceRoot,
+  findEnclosingRepoRoot,
+  pruneGlobalRegistry,
+  unregisterWorkspaceFromGlobalRegistry,
+} from './assessor.js';
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
 import { activeLockOwner, syncLockPath } from './sync-lock.js';
@@ -38,13 +44,176 @@ export interface HookInvocationOptions {
 export interface ParsedHookInput {
   harness: HookHarnessFormat;
   eventType: string;
+  toolName?: string;
   filePath?: string;
+  commandLine?: string;
+  commandFailed?: boolean;
   workspacePaths: string[];
   rawPayload: Record<string, unknown>;
 }
 
+export type GitLifecycleAction =
+  | { kind: 'worktree-add'; targetPath: string }
+  | { kind: 'worktree-remove'; targetPaths: string[] }
+  | { kind: 'worktree-prune' }
+  | { kind: 'head-mutation'; repoPath: string }
+  | { kind: 'repo-created'; targetPath: string };
+
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4319;
+
+function tokenizeShellSegment(segment: string): string[] {
+  const tokens: string[] = [];
+  const re = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(segment)) !== null) {
+    tokens.push((m[1] ?? m[2] ?? m[3] ?? '').replace(/\\(["\\$`])/g, '$1'));
+  }
+  return tokens;
+}
+
+/**
+ * Parses shell command strings (`run_command` / `Bash`) for Git repository, worktree, and branch
+ * lifecycle operations (`worktree add/remove/prune`, `switch/checkout/pull/merge/rebase/reset`, `init/clone`).
+ */
+export function extractGitLifecycleActions(commandLine: string, defaultCwd: string): GitLifecycleAction[] {
+  if (!commandLine || !/\bgit\b/.test(commandLine)) return [];
+  const actions: GitLifecycleAction[] = [];
+  let activeCwd = path.resolve(defaultCwd);
+
+  const segments = commandLine.split(/\s*(?:&&|\|\||;|\r?\n)\s*/);
+  for (const rawSeg of segments) {
+    const seg = rawSeg.trim();
+    if (!seg) continue;
+    const tokens = tokenizeShellSegment(seg);
+    if (tokens.length === 0) continue;
+
+    // Strip leading VAR=val assignments
+    let idx = 0;
+    while (idx < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx]!)) {
+      idx += 1;
+    }
+    const cmd = tokens[idx];
+    if (!cmd) continue;
+
+    if (cmd === 'cd' && tokens[idx + 1]) {
+      activeCwd = path.resolve(activeCwd, tokens[idx + 1]!);
+      continue;
+    }
+    if (cmd !== 'git') continue;
+
+    let gitCwd = activeCwd;
+    let gIdx = idx + 1;
+    while (gIdx < tokens.length) {
+      const tok = tokens[gIdx]!;
+      if (tok === '-C' && tokens[gIdx + 1]) {
+        gitCwd = path.resolve(gitCwd, tokens[gIdx + 1]!);
+        gIdx += 2;
+      } else if (tok === '-c' && tokens[gIdx + 1]) {
+        gIdx += 2;
+      } else if (tok.startsWith('--git-dir=') || tok.startsWith('--work-tree=') || tok === '--no-pager') {
+        gIdx += 1;
+      } else {
+        break;
+      }
+    }
+
+    const sub = tokens[gIdx];
+    if (!sub) continue;
+
+    if (sub === 'worktree') {
+      const wtSub = tokens[gIdx + 1];
+      if (wtSub === 'add') {
+        const valueFlags = new Set(['-b', '-B', '--reason']);
+        let aIdx = gIdx + 2;
+        let wtPath: string | null = null;
+        while (aIdx < tokens.length) {
+          const t = tokens[aIdx]!;
+          if (valueFlags.has(t)) {
+            aIdx += 2;
+            continue;
+          }
+          if (t.startsWith('-')) {
+            aIdx += 1;
+            continue;
+          }
+          wtPath = path.resolve(gitCwd, t);
+          break;
+        }
+        if (wtPath) {
+          actions.push({ kind: 'worktree-add', targetPath: wtPath });
+        }
+      } else if (wtSub === 'remove') {
+        const targets: string[] = [];
+        for (let rIdx = gIdx + 2; rIdx < tokens.length; rIdx += 1) {
+          const t = tokens[rIdx]!;
+          if (t.startsWith('-')) continue;
+          targets.push(path.resolve(gitCwd, t));
+        }
+        if (targets.length > 0) {
+          actions.push({ kind: 'worktree-remove', targetPaths: targets });
+        }
+      } else if (wtSub === 'prune') {
+        actions.push({ kind: 'worktree-prune' });
+      }
+      continue;
+    }
+
+    if (
+      sub === 'checkout' ||
+      sub === 'switch' ||
+      sub === 'pull' ||
+      sub === 'merge' ||
+      sub === 'rebase' ||
+      sub === 'reset' ||
+      sub === 'cherry-pick' ||
+      sub === 'revert'
+    ) {
+      actions.push({ kind: 'head-mutation', repoPath: gitCwd });
+      continue;
+    }
+
+    if (sub === 'init') {
+      let targetDir = gitCwd;
+      for (let iIdx = gIdx + 1; iIdx < tokens.length; iIdx += 1) {
+        const t = tokens[iIdx]!;
+        if (t === '-b' || t === '--initial-branch' || t === '--template' || t === '--separate-git-dir') {
+          iIdx += 1;
+          continue;
+        }
+        if (t.startsWith('-')) continue;
+        targetDir = path.resolve(gitCwd, t);
+        break;
+      }
+      actions.push({ kind: 'repo-created', targetPath: targetDir });
+      continue;
+    }
+
+    if (sub === 'clone') {
+      const valueFlags = new Set(['-b', '--branch', '-o', '--origin', '--depth', '--reference', '--filter', '-j', '--jobs', '-c', '--config']);
+      const positionals: string[] = [];
+      for (let cIdx = gIdx + 1; cIdx < tokens.length; cIdx += 1) {
+        const t = tokens[cIdx]!;
+        if (valueFlags.has(t)) {
+          cIdx += 1;
+          continue;
+        }
+        if (t.startsWith('-')) continue;
+        positionals.push(t);
+      }
+      if (positionals.length >= 2) {
+        actions.push({ kind: 'repo-created', targetPath: path.resolve(gitCwd, positionals[1]!) });
+      } else if (positionals.length === 1) {
+        const base = path.basename(positionals[0]!.replace(/\/+$/, '').replace(/\.git$/, ''));
+        if (base) {
+          actions.push({ kind: 'repo-created', targetPath: path.resolve(gitCwd, base) });
+        }
+      }
+    }
+  }
+
+  return actions;
+}
 
 /**
  * Polymorphically parses stdin JSON from either Antigravity or Claude Code hook harnesses.
@@ -73,23 +242,33 @@ export function parseHookInput(eventTypeArg: string, rawStdinJson: string): Pars
     (typeof parsed.Path === 'string' ? parsed.Path : undefined) ??
     (typeof parsed.TargetFile === 'string' ? parsed.TargetFile : undefined);
 
-  // Detect Claude Code format: { hook_event_name, tool_name, tool_input: { file_path, path }, cwd }
+  const agyToolName = typeof toolCall?.name === 'string' ? toolCall.name : undefined;
+  const agyCommandLine =
+    typeof toolCallArgs?.CommandLine === 'string'
+      ? toolCallArgs.CommandLine
+      : typeof toolCallArgs?.command === 'string'
+        ? toolCallArgs.command
+        : undefined;
+
+  // Detect Claude Code format: { hook_event_name, tool_name, tool_input: { file_path, path, command }, cwd }
   const toolInput = parsed.tool_input as Record<string, unknown> | undefined;
+  const claudeToolName = typeof parsed.tool_name === 'string' ? parsed.tool_name : undefined;
   const claudeFilePath =
     (typeof toolInput?.file_path === 'string' ? toolInput.file_path : undefined) ??
     (typeof toolInput?.path === 'string' ? toolInput.path : undefined) ??
     (typeof parsed.file_path === 'string' ? parsed.file_path : undefined);
+  const claudeCommandLine = typeof toolInput?.command === 'string' ? toolInput.command : undefined;
 
   const workspacePaths: string[] = [];
+  if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) {
+    workspacePaths.push(parsed.cwd.trim());
+  }
   if (Array.isArray(parsed.workspacePaths)) {
     for (const wp of parsed.workspacePaths) {
-      if (typeof wp === 'string' && wp.trim()) {
+      if (typeof wp === 'string' && wp.trim() && !workspacePaths.includes(wp.trim())) {
         workspacePaths.push(wp.trim());
       }
     }
-  }
-  if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) {
-    workspacePaths.push(parsed.cwd.trim());
   }
 
   let harness: HookHarnessFormat = 'unknown';
@@ -116,10 +295,18 @@ export function parseHookInput(eventTypeArg: string, rawStdinJson: string): Pars
     (typeof parsed.event === 'string' ? parsed.event : '') ||
     'post-tool-use';
 
+  const toolResponse = parsed.tool_response as Record<string, unknown> | undefined;
+  const commandFailed =
+    Boolean(parsed.error) ||
+    (typeof toolResponse?.exitCode === 'number' && toolResponse.exitCode !== 0);
+
   return {
     harness,
     eventType: normalizedEvent,
+    toolName: agyToolName ?? claudeToolName,
     filePath: agyTargetFile ?? claudeFilePath,
+    commandLine: agyCommandLine ?? claudeCommandLine,
+    commandFailed,
     workspacePaths,
     rawPayload: parsed,
   };
@@ -242,6 +429,47 @@ export async function handleHookInvocation(
   let filesUpdated = 0;
   const resolvedWorkspaces: string[] = [];
 
+  if (lowerEvent === 'pre-tool-use' || lowerEvent === 'pretooluse') {
+    if (parsed.commandLine) {
+      const baseCwd = parsed.workspacePaths[0] ?? fallbackRoot;
+      const actions = extractGitLifecycleActions(parsed.commandLine, baseCwd);
+      for (const action of actions) {
+        if (action.kind === 'worktree-remove') {
+          for (const wtPath of action.targetPaths) {
+            try {
+              const dotGit = path.join(wtPath, '.git');
+              const astDir = path.join(wtPath, '.ast-graph');
+              // Only pre-remove `.ast-graph` inside linked worktrees (`.git` pointer file) so user
+              // files remain protected by Git's dirty-worktree check without `.ast-graph/` blocking removal.
+              if (fs.existsSync(astDir) && fs.existsSync(dotGit) && fs.statSync(dotGit).isFile()) {
+                fs.rmSync(astDir, { recursive: true, force: true });
+                unregisterWorkspaceFromGlobalRegistry(wtPath);
+                resolvedWorkspaces.push(wtPath);
+              }
+            } catch {
+              // non-fatal
+            }
+          }
+        }
+      }
+    }
+    const durationMs = Number((performance.now() - startTime).toFixed(2));
+    const stdoutJson: Record<string, unknown> =
+      parsed.harness === 'antigravity'
+        ? { decision: 'allow' }
+        : parsed.harness === 'claude-code'
+          ? { continue: true }
+          : {};
+    return {
+      harness: parsed.harness,
+      eventType: parsed.eventType,
+      workspaceRoots: resolvedWorkspaces,
+      filesUpdated: 0,
+      durationMs,
+      stdoutJson,
+    };
+  }
+
   if (lowerEvent === 'session-start' || lowerEvent === 'sessionstart') {
     const rawRoots =
       options?.workspaceRoot
@@ -316,6 +544,41 @@ export async function handleHookInvocation(
           const delta = indexer.syncWorkspace({ full: false, targetPaths: [absTarget] });
           return delta.filesUpdated + delta.filesDeleted;
         });
+      }
+    } else if (parsed.commandLine !== undefined) {
+      if (!parsed.commandFailed) {
+        const baseCwd = parsed.workspacePaths[0] ?? fallbackRoot;
+        const actions = extractGitLifecycleActions(parsed.commandLine, baseCwd);
+        for (const action of actions) {
+          if (action.kind === 'worktree-remove' || action.kind === 'worktree-prune') {
+            if (action.kind === 'worktree-remove') {
+              for (const wtPath of action.targetPaths) {
+                unregisterWorkspaceFromGlobalRegistry(wtPath);
+              }
+            }
+            pruneGlobalRegistry();
+            continue;
+          }
+          const rawTargetRoot =
+            action.kind === 'head-mutation' ? action.repoPath : action.targetPath;
+          if (!fs.existsSync(rawTargetRoot)) continue;
+          const wsRoot =
+            findEnclosingRepoRoot(rawTargetRoot) ?? canonicalizeWorkspaceRoot(rawTargetRoot);
+          if (!resolvedWorkspaces.includes(wsRoot)) {
+            resolvedWorkspaces.push(wsRoot);
+          }
+          const dbPath =
+            options?.dbPath ?? path.join(wsRoot, '.ast-graph', 'ast.db');
+          if (coldBuild === 'background') {
+            assessWorkspace(wsRoot);
+            spawnBackgroundBuild(wsRoot, dbPath);
+          } else {
+            filesUpdated += runHookSync(wsRoot, dbPath, coldBuild, (indexer) => {
+              const delta = indexer.lazySyncIfDirty();
+              return delta.filesUpdated + delta.filesDeleted;
+            });
+          }
+        }
       }
     } else {
       const wsRoot = options?.workspaceRoot
@@ -404,6 +667,12 @@ if (isMain) {
     .catch(() => {
       // Never block the harness on an indexing failure; queries will surface real errors.
       const claude = Boolean(process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR);
-      process.stdout.write(claude ? '{"continue":true}\n' : '{}\n');
+      const isPreTool = eventArg.toLowerCase().startsWith('pre-tool') || eventArg.toLowerCase() === 'pretooluse';
+      const fallback = claude
+        ? '{"continue":true}\n'
+        : isPreTool
+          ? '{"decision":"allow"}\n'
+          : '{}\n';
+      process.stdout.write(fallback);
     });
 }

@@ -24,10 +24,33 @@ export interface HookInvocationOptions {
 export interface ParsedHookInput {
     harness: HookHarnessFormat;
     eventType: string;
+    toolName?: string;
     filePath?: string;
+    commandLine?: string;
+    commandFailed?: boolean;
     workspacePaths: string[];
     rawPayload: Record<string, unknown>;
 }
+export type GitLifecycleAction = {
+    kind: 'worktree-add';
+    targetPath: string;
+} | {
+    kind: 'worktree-remove';
+    targetPaths: string[];
+} | {
+    kind: 'worktree-prune';
+} | {
+    kind: 'head-mutation';
+    repoPath: string;
+} | {
+    kind: 'repo-created';
+    targetPath: string;
+};
+/**
+ * Parses shell command strings (`run_command` / `Bash`) for Git repository, worktree, and branch
+ * lifecycle operations (`worktree add/remove/prune`, `switch/checkout/pull/merge/rebase/reset`, `init/clone`).
+ */
+export declare function extractGitLifecycleActions(commandLine: string, defaultCwd: string): GitLifecycleAction[];
 /**
  * Polymorphically parses stdin JSON from either Antigravity or Claude Code hook harnesses.
  */

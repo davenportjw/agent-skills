@@ -15,6 +15,6 @@ export { PolyglotCompilerAdapter, detectPolyglotLanguage } from './adapters/poly
 export { analyzeGraph, runBenchmark, synthesizeBenchmarkWorkload, isPolyglotTestFile, } from './analyzer.js';
 export { startSidecarDaemon, type SidecarDaemonOptions, type SidecarDaemonInstance, } from './daemon.js';
 export { AstMcpServer, MCP_TOOLS_MANIFEST, normalizeMcpToolArgs, type JsonRpcRequest, type JsonRpcResponse, } from './mcp.js';
-export { handleHookInvocation, parseHookInput, type HookHarnessFormat, type HookResult, type HookInvocationOptions, type ParsedHookInput, } from './hook-handler.js';
+export { extractGitLifecycleActions, handleHookInvocation, parseHookInput, type GitLifecycleAction, type HookHarnessFormat, type HookResult, type HookInvocationOptions, type ParsedHookInput, } from './hook-handler.js';
 export { executeCliCommand, type CliExecutionOptions, } from './cli.js';
 //# sourceMappingURL=index.d.ts.map

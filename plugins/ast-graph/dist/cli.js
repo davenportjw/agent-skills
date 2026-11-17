@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { assessWorkspace, canonicalizeWorkspaceRoot } from './assessor.js';
+import { assessWorkspace, canonicalizeWorkspaceRoot, pruneGlobalRegistry, unregisterWorkspaceFromGlobalRegistry, } from './assessor.js';
 import { AstGraphDatabase } from './db.js';
 import { AstGraphIndexer } from './indexer.js';
 import { analyzeGraph, runBenchmark } from './analyzer.js';
@@ -721,6 +721,25 @@ export async function executeCliCommand(rawArgs, options) {
             data: manifest,
         };
     }
+    if (command === 'prune' || command === 'cleanup-worktree') {
+        const cleanedPaths = [];
+        for (const rawTarget of rawTargets) {
+            const targetRoot = path.resolve(workspaceRoot, rawTarget);
+            const targetAstDir = path.join(targetRoot, '.ast-graph');
+            if (fs.existsSync(targetAstDir)) {
+                fs.rmSync(targetAstDir, { recursive: true, force: true });
+                cleanedPaths.push(targetRoot);
+            }
+            unregisterWorkspaceFromGlobalRegistry(targetRoot);
+        }
+        const registry = pruneGlobalRegistry();
+        const data = { cleanedPaths, registry };
+        return {
+            exitCode: 0,
+            output: JSON.stringify(data, null, 2),
+            data,
+        };
+    }
     // Try daemon first if allowed and command is supported over HTTP (for single-target queries)
     if (useDaemon && rawTargets.length <= 1) {
         if (command === 'status') {
@@ -827,7 +846,7 @@ export async function executeCliCommand(rawArgs, options) {
         if (command === 'sync') {
             const force = rawArgs.includes('--force') || rawArgs.includes('--full');
             const syncResult = indexer.syncWorkspace({
-                full: force || db.getCounts().files === 0,
+                full: force,
                 exportSnapshots: rawArgs.includes('--export') && !rawArgs.includes('--no-export'),
             });
             const counts = db.getCounts();

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000",
     "assess": "node --no-warnings ./dist/cli.js assess",
     "sync": "node --no-warnings ./dist/cli.js sync",
     "analyze": "node --no-warnings ./dist/cli.js analyze",

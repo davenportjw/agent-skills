@@ -12,12 +12,14 @@ export declare function loadRepoQueryAliases(repoRoot: string): Record<string, s
 export declare class AstGraphDatabase {
     readonly dbPath: string;
     readonly db: DatabaseSync;
+    isClosed: boolean;
     constructor(dbPath: string, expectedWorkspaceRoot?: string);
     private queryAliasCache;
     /** Concept aliases from the bound repo's ast-graph.config.json (re-read when the file changes). */
     getQueryAliases(): Record<string, string[]>;
     getMeta(key: string): string | null;
     setMeta(key: string, value: string): void;
+    deleteMeta(key: string): void;
     verifyRepoBinding(workspaceRoot: string): void;
     /** Empty every derived table (index rows, telemetry) while keeping the schema; forces a cold sync. */
     private resetDerivedData;
@@ -43,6 +45,22 @@ export declare class AstGraphDatabase {
      * reader in another process pins an old snapshot, SQLite checkpoints what it can and returns.
      */
     checkpointWal(): void;
+    /**
+     * Reclaims dead SQLite freelist pages and compacts FTS5 segments after heavy branch/file churn.
+     * Defaults to triggering when >= 4000 pages (~16MB) and >= 25% of pages are free.
+     */
+    compactIfNeeded(options?: {
+        force?: boolean;
+        minFreePages?: number;
+        minFreeRatio?: number;
+    }): boolean;
+    /**
+     * Seeds an empty worktree database in-place from its parent repository's `ast.db` (~10ms via
+     * deferred ATTACH SELECT, safe even while another process reads or writes the parent WAL),
+     * skipping nested `.worktrees/` paths and leaving `last_git_head` unset so the next sync diffs
+     * any files that diverged on the worktree branch.
+     */
+    seedFromParentDatabase(parentDbPath: string, targetWorkspaceRoot: string): boolean;
     private initializeSchema;
     close(): void;
     getTrackedFilesMap(): Map<string, {

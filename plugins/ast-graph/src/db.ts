@@ -64,6 +64,7 @@ export function loadRepoQueryAliases(repoRoot: string): Record<string, string[]>
 export class AstGraphDatabase {
   public readonly dbPath: string;
   public readonly db: DatabaseSync;
+  public isClosed = false;
 
   constructor(dbPath: string, expectedWorkspaceRoot?: string) {
     this.dbPath = dbPath === ':memory:' ? ':memory:' : path.resolve(dbPath);
@@ -110,6 +111,10 @@ export class AstGraphDatabase {
     this.db
       .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, value);
+  }
+
+  public deleteMeta(key: string): void {
+    this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
   }
 
   public verifyRepoBinding(workspaceRoot: string): void {
@@ -245,6 +250,119 @@ export class AstGraphDatabase {
     }
   }
 
+  /**
+   * Reclaims dead SQLite freelist pages and compacts FTS5 segments after heavy branch/file churn.
+   * Defaults to triggering when >= 4000 pages (~16MB) and >= 25% of pages are free.
+   */
+  public compactIfNeeded(options?: {
+    force?: boolean;
+    minFreePages?: number;
+    minFreeRatio?: number;
+  }): boolean {
+    if (this.dbPath === ':memory:') return false;
+    const minFreePages = options?.minFreePages ?? 4000;
+    const minFreeRatio = options?.minFreeRatio ?? 0.25;
+    try {
+      const freeRow = this.db.prepare('PRAGMA freelist_count').get() as { freelist_count?: number } | undefined;
+      const pageRow = this.db.prepare('PRAGMA page_count').get() as { page_count?: number } | undefined;
+      const freePages = freeRow?.freelist_count ?? 0;
+      const totalPages = pageRow?.page_count ?? 0;
+      const shouldCompact =
+        options?.force === true ||
+        (totalPages > 0 && freePages >= minFreePages && freePages / totalPages >= minFreeRatio);
+      if (!shouldCompact) return false;
+      this.db.exec("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');");
+      this.db.exec('VACUUM;');
+      this.checkpointWal();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Seeds an empty worktree database in-place from its parent repository's `ast.db` (~10ms via
+   * deferred ATTACH SELECT, safe even while another process reads or writes the parent WAL),
+   * skipping nested `.worktrees/` paths and leaving `last_git_head` unset so the next sync diffs
+   * any files that diverged on the worktree branch.
+   */
+  public seedFromParentDatabase(parentDbPath: string, targetWorkspaceRoot: string): boolean {
+    if (this.dbPath === ':memory:') return false;
+    const resolvedParent = path.resolve(parentDbPath);
+    if (resolvedParent === this.dbPath || !fs.existsSync(resolvedParent)) return false;
+    if (this.getCounts().files > 0) return false;
+
+    const canonicalTarget = canonicalizeWorkspaceRoot(targetWorkspaceRoot);
+    let attached = false;
+    try {
+      this.db.prepare('ATTACH DATABASE ? AS seed_parent').run(resolvedParent);
+      attached = true;
+      const uvRow = this.db.prepare('PRAGMA seed_parent.user_version').get() as
+        | { user_version?: number }
+        | undefined;
+      if (uvRow?.user_version !== AstGraphDatabase.SCHEMA_VERSION) {
+        return false;
+      }
+      const parentCount = (
+        this.db.prepare('SELECT COUNT(*) as c FROM seed_parent.files').get() as { c?: number } | undefined
+      )?.c ?? 0;
+      if (parentCount === 0) {
+        return false;
+      }
+
+      // Use a deferred BEGIN (not BEGIN IMMEDIATE) so SQLite only acquires a read snapshot on
+      // seed_parent while taking a write lock exclusively on `main`.
+      this.db.exec('BEGIN');
+      try {
+        this.db.exec(`
+          INSERT OR IGNORE INTO files
+            SELECT * FROM seed_parent.files
+            WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
+          INSERT OR IGNORE INTO nodes
+            SELECT * FROM seed_parent.nodes
+            WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
+          INSERT OR IGNORE INTO node_labels
+            SELECT nl.node_id, nl.label
+            FROM seed_parent.node_labels nl
+            INNER JOIN nodes n ON n.id = nl.node_id;
+          INSERT OR IGNORE INTO edges
+            SELECT * FROM seed_parent.edges
+            WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
+          INSERT OR IGNORE INTO diagnostics (file_path, enclosing_symbol_id, compiler, severity, code, message, line, col)
+            SELECT file_path, enclosing_symbol_id, compiler, severity, code, message, line, col
+            FROM seed_parent.diagnostics
+            WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
+          INSERT INTO nodes_fts(id, name, qualified_name, signature, docstring, package_name, file_path)
+            SELECT id, name, qualified_name, signature, docstring, package_name, file_path
+            FROM nodes;
+        `);
+        this.setMeta('repo_id', computeRepoId(canonicalTarget));
+        this.setMeta('canonical_root', canonicalTarget);
+        this.deleteMeta('last_git_head');
+        this.db.exec('COMMIT');
+      } catch (innerErr) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          // ignore rollback error
+        }
+        throw innerErr;
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (attached) {
+        try {
+          this.db.exec('DETACH DATABASE seed_parent');
+        } catch {
+          // ignore detach error
+        }
+      }
+      this.checkpointWal();
+    }
+  }
+
   private initializeSchema(): void {
     this.migrateSchema();
     this.db.exec(`
@@ -364,6 +482,8 @@ export class AstGraphDatabase {
   }
 
   public close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
     this.db.close();
   }
 
@@ -577,6 +697,11 @@ export class AstGraphDatabase {
       counts.nodes,
       counts.edges,
     );
+    try {
+      this.db.exec('DELETE FROM sync_runs WHERE id <= (SELECT MAX(id) - 200 FROM sync_runs)');
+    } catch {
+      // non-fatal
+    }
   }
 
   public recordQueryTelemetry(queryType: string, target: string, latencyMs: number, resultCount: number): void {
@@ -586,6 +711,7 @@ export class AstGraphDatabase {
         VALUES (?, ?, ?, ?, ?)
       `);
       stmt.run(new Date().toISOString(), queryType, target, latencyMs, resultCount);
+      this.db.exec('DELETE FROM query_telemetry WHERE id <= (SELECT MAX(id) - 500 FROM query_telemetry)');
     } catch {
       // Ignore telemetry write errors if read-only
     }

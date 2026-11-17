@@ -31,8 +31,10 @@ export {
   type JsonRpcResponse,
 } from './mcp.js';
 export {
+  extractGitLifecycleActions,
   handleHookInvocation,
   parseHookInput,
+  type GitLifecycleAction,
   type HookHarnessFormat,
   type HookResult,
   type HookInvocationOptions,

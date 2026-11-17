@@ -8,9 +8,21 @@
         "timeout": 20
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --no-warnings ./dist/hook-handler.js pre-tool-use",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
-        "matcher": "write_to_file|replace_file_content|multi_replace_file_content|edit_file|write_file",
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content|edit_file|write_file|run_command",
         "hooks": [
           {
             "type": "command",
