@@ -11,6 +11,7 @@ import type {
   GraphNodeRecord,
   NodeKind,
 } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 const IGNORED_DIRS = new Set([
   '.git',
@@ -83,6 +84,7 @@ export class WebCompilerAdapter implements CompilerAdapter {
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(full)) continue;
           walk(full);
         } else if (entry.isFile() && isSupportedWebFile(entry.name)) {
           results.push(full);

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isExcludedSubtree } from './repo-boundary.js';
 const SKIP_DIRS = new Set([
     'node_modules',
     'dist',
@@ -278,6 +279,8 @@ export function assessWorkspace(workspaceRoot) {
                 continue;
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
+                if (isExcludedSubtree(fullPath))
+                    continue;
                 walk(fullPath);
             }
             else if (entry.isFile()) {

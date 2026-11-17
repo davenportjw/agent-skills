@@ -36,16 +36,30 @@ import type {
   TestsForChangeResult,
 } from './types.js';
 
-const CANONICAL_QUERY_ALIASES: Record<string, string[]> = {
-  'SimEngine.step': ['tick', 'stepHuman', 'stepHumanTick'],
-  sanitizeDirective: ['sanitiseOutputText', 'normaliseInput', 'validateParsedOrder', 'applyAgentDirective'],
-  SiteServer: ['createSiteServer', 'SiteServerInstance', 'SiteServerOptions'],
-  LobbyServer: ['createLobbyServer', 'selectSiteForJoin'],
-};
+/**
+ * Optional per-repo concept aliases, committed at `<repo>/ast-graph.config.json`:
+ *   { "aliases": { "sanitizeDirective": ["sanitiseOutputText", "normaliseInput"] } }
+ * Aliases only feed suggestions and fuzzy search; they never satisfy an exact symbol lookup.
+ */
+export const REPO_CONFIG_FILENAME = 'ast-graph.config.json';
 
-const SUGGESTION_QUERY_HINTS: Record<string, string[]> = {
-  SimEngine: ['tick', 'createWorld', 'stepHuman', 'humanInteract', 'interactAt'],
-};
+export function loadRepoQueryAliases(repoRoot: string): Record<string, string[]> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(repoRoot, REPO_CONFIG_FILENAME), 'utf8')) as {
+      aliases?: Record<string, unknown>;
+    };
+    const out: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(raw.aliases ?? {})) {
+      if (Array.isArray(value)) {
+        const names = value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+        if (names.length > 0) out[key] = names;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export class AstGraphDatabase {
   public readonly dbPath: string;
@@ -67,6 +81,24 @@ export class AstGraphDatabase {
     }
   }
 
+  private queryAliasCache: { mtimeMs: number; aliases: Record<string, string[]> } | null = null;
+
+  /** Concept aliases from the bound repo's ast-graph.config.json (re-read when the file changes). */
+  public getQueryAliases(): Record<string, string[]> {
+    const root = this.getMeta('canonical_root');
+    if (!root) return {};
+    let mtimeMs = -1;
+    try {
+      mtimeMs = fs.statSync(path.join(root, REPO_CONFIG_FILENAME)).mtimeMs;
+    } catch {
+      mtimeMs = -1;
+    }
+    if (!this.queryAliasCache || this.queryAliasCache.mtimeMs !== mtimeMs) {
+      this.queryAliasCache = { mtimeMs, aliases: mtimeMs < 0 ? {} : loadRepoQueryAliases(root) };
+    }
+    return this.queryAliasCache.aliases;
+  }
+
   public getMeta(key: string): string | null {
     const row = this.db
       .prepare('SELECT value FROM meta WHERE key = ?')
@@ -83,28 +115,37 @@ export class AstGraphDatabase {
   public verifyRepoBinding(workspaceRoot: string): void {
     const canonicalRoot = canonicalizeWorkspaceRoot(workspaceRoot);
     const expectedRepoId = computeRepoId(canonicalRoot);
+    let isOwnIndexDir = this.dbPath === ':memory:';
 
     if (this.dbPath !== ':memory:') {
       const canonicalDbDir = canonicalizeWorkspaceRoot(path.dirname(this.dbPath));
-      if (!canonicalDbDir.startsWith(canonicalRoot)) {
+      const rel = path.relative(canonicalRoot, canonicalDbDir);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
         throw new Error(
           `TAMPER_GUARD: Database path "${this.dbPath}" resides outside target repository "${canonicalRoot}". Cross-repository AST GraphDB access is forbidden.`,
         );
       }
+      isOwnIndexDir = canonicalDbDir === path.join(canonicalRoot, '.ast-graph');
     }
 
     const storedRepoId = this.getMeta('repo_id');
     const storedRoot = this.getMeta('canonical_root');
+    const mismatch =
+      (storedRepoId && storedRepoId !== expectedRepoId) || (storedRoot && storedRoot !== canonicalRoot);
 
-    if (storedRepoId && storedRepoId !== expectedRepoId) {
-      throw new Error(
-        `TAMPER_GUARD: Database repo_id mismatch (stored="${storedRepoId}", expected="${expectedRepoId}" for "${canonicalRoot}"). Refusing to open cross-project database.`,
-      );
-    }
-    if (storedRoot && storedRoot !== canonicalRoot) {
-      throw new Error(
-        `TAMPER_GUARD: Database canonical_root mismatch (stored="${storedRoot}", expected="${canonicalRoot}"). Refusing to open cross-project database.`,
-      );
+    if (mismatch) {
+      if (!isOwnIndexDir) {
+        throw new Error(
+          `TAMPER_GUARD: Database binding mismatch (stored repo_id="${storedRepoId}", root="${storedRoot}"; expected repo_id="${expectedRepoId}" for "${canonicalRoot}"). Refusing to open cross-project database.`,
+        );
+      }
+      // The database sits in this repo's own `.ast-graph/` but was stamped for another path: the
+      // checkout or worktree was moved/renamed/copied. The index is derived data, so rebind and
+      // clear it; the next query triggers a full re-sync instead of failing hard.
+      this.resetDerivedData(`rebound from "${storedRoot ?? storedRepoId}" to "${canonicalRoot}"`);
+      this.setMeta('repo_id', expectedRepoId);
+      this.setMeta('canonical_root', canonicalRoot);
+      return;
     }
 
     if (!storedRepoId || !storedRoot) {
@@ -112,6 +153,25 @@ export class AstGraphDatabase {
       this.setMeta('canonical_root', canonicalRoot);
     }
   }
+
+  /** Empty every derived table (index rows, telemetry) while keeping the schema; forces a cold sync. */
+  private resetDerivedData(reason: string): void {
+    this.db.exec('PRAGMA foreign_keys = OFF;');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const table of AstGraphDatabase.DERIVED_TABLES) {
+        this.db.exec(`DELETE FROM "${table}";`);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON;');
+    }
+    this.schemaRebuilt = { fromVersion: AstGraphDatabase.SCHEMA_VERSION, reason };
+  }
+
 
   /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
   public static readonly SCHEMA_VERSION = 3;
@@ -172,6 +232,19 @@ export class AstGraphDatabase {
     };
   }
 
+  /**
+   * Fold the WAL back into the main database and truncate it. Called after every sync so the
+   * `-wal` file does not grow unbounded (it reached >100MB on large monorepos). Best-effort: if a
+   * reader in another process pins an old snapshot, SQLite checkpoints what it can and returns.
+   */
+  public checkpointWal(): void {
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    } catch {
+      // Busy readers are fine; the next sync retries.
+    }
+  }
+
   private initializeSchema(): void {
     this.migrateSchema();
     this.db.exec(`
@@ -179,6 +252,7 @@ export class AstGraphDatabase {
       PRAGMA foreign_keys = ON;
       PRAGMA busy_timeout = 5000;
       PRAGMA synchronous = NORMAL;
+      PRAGMA journal_size_limit = 67108864;
 
       CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
@@ -697,8 +771,9 @@ export class AstGraphDatabase {
       if (byFile.length > 0) return this.expandFileMatches(byFile.map((r) => this.mapNodeRow(r)), limit);
     }
 
-    // 4. Canonical domain alias resolution (e.g. SimEngine.step -> tick, sanitizeDirective -> sanitiseOutputText/normaliseInput)
-    const aliasTargets = CANONICAL_QUERY_ALIASES[trimmed];
+    // 4. Repo-configured concept aliases (ast-graph.config.json). Never used for exact lookups, so an
+    // alias hit surfaces as a labelled "No exact match" suggestion instead of masquerading as the target.
+    const aliasTargets = options?.exactOnly ? undefined : this.getQueryAliases()[trimmed];
     if (aliasTargets && aliasTargets.length > 0) {
       const placeholders = aliasTargets.map(() => '?').join(', ');
       const aliasRows = this.db
@@ -902,7 +977,7 @@ export class AstGraphDatabase {
     }
 
     // Check suggestion hints or canonical aliases before FTS fallback so known conceptual terms rank high
-    const hintNames = SUGGESTION_QUERY_HINTS[cleaned] ?? CANONICAL_QUERY_ALIASES[cleaned];
+    const hintNames = this.getQueryAliases()[cleaned];
     if (results.size < limit && hintNames && hintNames.length > 0) {
       const placeholders = hintNames.map(() => '?').join(', ');
       const hintRows = this.db

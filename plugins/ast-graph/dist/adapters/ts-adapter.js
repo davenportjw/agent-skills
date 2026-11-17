@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { isExcludedSubtree } from '../repo-boundary.js';
 function computeCyclomaticComplexity(node) {
     let complexity = 1;
     const visit = (n) => {
@@ -215,6 +216,8 @@ export class TypeScriptCompilerAdapter {
                 }
                 const fullPath = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
+                    if (isExcludedSubtree(fullPath))
+                        continue;
                     walk(fullPath);
                 }
                 else if (entry.isFile()) {

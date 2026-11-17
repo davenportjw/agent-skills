@@ -13,6 +13,7 @@ import type {
   NodeKind,
   ScipSymbolUri,
 } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 interface WorkspacePkgInfo {
   name: string;
@@ -250,6 +251,7 @@ export class TypeScriptCompilerAdapter implements CompilerAdapter {
         }
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(fullPath)) continue;
           walk(fullPath);
         } else if (entry.isFile()) {
           const relPath = path.relative(workspaceRoot, fullPath).split(path.sep).join('/');

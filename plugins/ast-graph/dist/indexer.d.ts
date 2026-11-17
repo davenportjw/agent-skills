@@ -24,6 +24,11 @@ export interface SyncResult {
         packages: number;
     };
     manifest?: ProjectAssessmentManifest;
+    /** Set when another live process owns the repo's sync lock; results come from the last committed index. */
+    lockedBy?: {
+        pid: number;
+        startedAt: number;
+    };
 }
 export declare class AstGraphIndexer {
     readonly workspaceRoot: string;
@@ -48,7 +53,7 @@ export declare class AstGraphIndexer {
     lazySyncIfDirty(options?: {
         targetFileHint?: string;
     }): SyncResult;
-    private acquireSyncLock;
+    private busyResult;
     syncWorkspace(options?: {
         full?: boolean;
         targetPaths?: string[];

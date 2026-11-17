@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { isExcludedSubtree } from '../repo-boundary.js';
 const IGNORED_DIRS = new Set([
     '.git',
     'node_modules',
@@ -69,6 +70,8 @@ export class WebCompilerAdapter {
                     continue;
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
+                    if (isExcludedSubtree(full))
+                        continue;
                     walk(full);
                 }
                 else if (entry.isFile() && isSupportedWebFile(entry.name)) {

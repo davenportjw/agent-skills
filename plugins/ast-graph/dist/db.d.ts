@@ -2,13 +2,25 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 declare const DatabaseSync: typeof DatabaseSyncType;
 type DatabaseSync = DatabaseSyncType;
 import type { BlastRadiusResult, CompilerGraphBatch, FileOutlineResult, LineageResult, ShortestPathResult, SymbolNeighborhood, SymbolReferencesResult, SymbolSummary, TestsForChangeResult } from './types.js';
+/**
+ * Optional per-repo concept aliases, committed at `<repo>/ast-graph.config.json`:
+ *   { "aliases": { "sanitizeDirective": ["sanitiseOutputText", "normaliseInput"] } }
+ * Aliases only feed suggestions and fuzzy search; they never satisfy an exact symbol lookup.
+ */
+export declare const REPO_CONFIG_FILENAME = "ast-graph.config.json";
+export declare function loadRepoQueryAliases(repoRoot: string): Record<string, string[]>;
 export declare class AstGraphDatabase {
     readonly dbPath: string;
     readonly db: DatabaseSync;
     constructor(dbPath: string, expectedWorkspaceRoot?: string);
+    private queryAliasCache;
+    /** Concept aliases from the bound repo's ast-graph.config.json (re-read when the file changes). */
+    getQueryAliases(): Record<string, string[]>;
     getMeta(key: string): string | null;
     setMeta(key: string, value: string): void;
     verifyRepoBinding(workspaceRoot: string): void;
+    /** Empty every derived table (index rows, telemetry) while keeping the schema; forces a cold sync. */
+    private resetDerivedData;
     /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
     static readonly SCHEMA_VERSION = 3;
     /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
@@ -25,6 +37,12 @@ export declare class AstGraphDatabase {
      * column-level ALTERs. A database written by a *newer* plugin is refused with an actionable error.
      */
     private migrateSchema;
+    /**
+     * Fold the WAL back into the main database and truncate it. Called after every sync so the
+     * `-wal` file does not grow unbounded (it reached >100MB on large monorepos). Best-effort: if a
+     * reader in another process pins an old snapshot, SQLite checkpoints what it can and returns.
+     */
+    checkpointWal(): void;
     private initializeSchema;
     close(): void;
     getTrackedFilesMap(): Map<string, {

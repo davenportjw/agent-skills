@@ -701,12 +701,18 @@ export class AstMcpServer {
                     };
                 }
                 const norm = normalizeMcpToolArgs(toolName, args);
+                let indexNotice = '';
                 // Lazy mtime check before any query tool (target-scoped for single-file ast_outline)
                 if (toolName !== 'ast_sync' && toolName !== 'ast_benchmark') {
                     const outlineHint = toolName === 'ast_outline' && norm.filePaths.length === 1
                         ? norm.filePaths[0]
                         : undefined;
-                    indexer.lazySyncIfDirty(outlineHint ? { targetFileHint: outlineHint } : undefined);
+                    const lazy = indexer.lazySyncIfDirty(outlineHint ? { targetFileHint: outlineHint } : undefined);
+                    if (lazy.lockedBy) {
+                        indexNotice =
+                            `[index busy] pid ${lazy.lockedBy.pid} is re-indexing this repo; ` +
+                                `results reflect the last committed index.\n`;
+                    }
                 }
                 let payload;
                 switch (toolName) {
@@ -959,7 +965,7 @@ export class AstMcpServer {
                         content: [
                             {
                                 type: 'text',
-                                text: formattedText,
+                                text: indexNotice + formattedText,
                             },
                         ],
                         structuredContent: payload,

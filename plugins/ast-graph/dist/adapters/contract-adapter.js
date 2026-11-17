@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isExcludedSubtree } from '../repo-boundary.js';
 function sha256Hex(s) {
     return crypto.createHash('sha256').update(s).digest('hex');
 }
@@ -24,6 +25,8 @@ export class ContractCompilerAdapter {
                     continue;
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
+                    if (isExcludedSubtree(full))
+                        continue;
                     walk(full);
                 }
                 else if (entry.isFile() && this.supportsFile(full)) {

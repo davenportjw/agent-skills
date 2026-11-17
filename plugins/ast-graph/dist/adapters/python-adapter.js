@@ -624,6 +624,7 @@ print(json.dumps({
     "diagnostics": all_diagnostics,
 }))
 `;
+import { isExcludedSubtree } from '../repo-boundary.js';
 export function extractPythonBatch(filesInput, packageName = 'python-pkg') {
     const files = [];
     const nodesMap = new Map();
@@ -812,6 +813,8 @@ export class PythonCompilerAdapter {
                 }
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
+                    if (isExcludedSubtree(full))
+                        continue;
                     walk(full);
                 }
                 else if (entry.isFile()) {

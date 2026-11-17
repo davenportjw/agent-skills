@@ -15,6 +15,8 @@ import { TypeScriptCompilerAdapter, isPublicMember } from './adapters/ts-adapter
 import { WebCompilerAdapter } from './adapters/web-adapter.js';
 import { assessWorkspace, canonicalizeWorkspaceRoot } from './assessor.js';
 import type { AstGraphDatabase } from './db.js';
+import { isPathInExcludedSubtree } from './repo-boundary.js';
+import { activeLockOwner, syncLockPath, tryAcquireSyncLock, type SyncLockInfo } from './sync-lock.js';
 import type {
   CompilerGraphBatch,
   EdgeKind,
@@ -40,6 +42,8 @@ export interface SyncResult {
     packages: number;
   };
   manifest?: ProjectAssessmentManifest;
+  /** Set when another live process owns the repo's sync lock; results come from the last committed index. */
+  lockedBy?: { pid: number; startedAt: number };
 }
 
 export class AstGraphIndexer {
@@ -111,6 +115,18 @@ export class AstGraphIndexer {
   public lazySyncIfDirty(options?: { targetFileHint?: string }): SyncResult {
     const t0 = performance.now();
     const tracked = this.db.getTrackedFilesMap();
+    const owner = activeLockOwner(syncLockPath(this.db.dbPath));
+    if (owner && owner.pid !== process.pid) {
+      // Another session/hook/daemon is indexing this repo: serve the last committed index instead of
+      // rescanning or queueing behind its write transaction.
+      if (tracked.size === 0) {
+        throw new Error(
+          `INDEX_BUILDING: another process (pid ${owner.pid}) is building the index for ${this.workspaceRoot}` +
+            ` (started ${Math.round((Date.now() - owner.startedAt) / 1000)}s ago); retry shortly.`,
+        );
+      }
+      return this.busyResult(t0, owner);
+    }
     if (tracked.size === 0) {
       return this.syncWorkspace({ full: true });
     }
@@ -210,32 +226,16 @@ export class AstGraphIndexer {
     };
   }
 
-  private acquireSyncLock(): (() => void) | null {
-    const lockPath = path.join(path.dirname(this.db.dbPath), 'sync.lock');
-    try {
-      fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-      if (fs.existsSync(lockPath)) {
-        const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs < 15000) {
-          return null;
-        }
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // Ignore stale lock removal race
-        }
-      }
-      fs.writeFileSync(lockPath, `${process.pid}:${Date.now()}`, { flag: 'wx' });
-      return () => {
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // Ignore cleanup race
-        }
-      };
-    } catch {
-      return null;
-    }
+  private busyResult(t0: number, owner: SyncLockInfo): SyncResult {
+    return {
+      mode: 'noop',
+      durationMs: performance.now() - t0,
+      filesScanned: 0,
+      filesUpdated: 0,
+      filesDeleted: 0,
+      totals: this.db.getCounts(),
+      lockedBy: { pid: owner.pid, startedAt: owner.startedAt },
+    };
   }
 
   public syncWorkspace(options: {
@@ -247,17 +247,27 @@ export class AstGraphIndexer {
     const t0 = performance.now();
     const tracked = this.db.getTrackedFilesMap();
     const isCold = tracked.size === 0 || Boolean(options.full);
-    const releaseLock = this.acquireSyncLock();
-    if (!releaseLock && !options.force && tracked.size > 0) {
-      return {
-        mode: 'noop',
-        durationMs: performance.now() - t0,
-        filesScanned: 0,
-        filesUpdated: 0,
-        filesDeleted: 0,
-        totals: this.db.getCounts(),
+    const lock = tryAcquireSyncLock(this.db.dbPath);
+    if (!lock) {
+      // Never run two writers against one repo index (even for cold/forced syncs): concurrent full
+      // re-indexes were the source of multi-minute MCP stalls when several sessions shared a repo.
+      const owner = activeLockOwner(syncLockPath(this.db.dbPath)) ?? {
+        pid: -1,
+        host: '',
+        startedAt: Date.now(),
+        heartbeatAt: Date.now(),
       };
+      if (tracked.size === 0) {
+        throw new Error(
+          `INDEX_BUILDING: another process (pid ${owner.pid}) is building the index for ${this.workspaceRoot}; retry shortly.`,
+        );
+      }
+      return this.busyResult(t0, owner);
     }
+    const releaseLock = () => {
+      this.db.checkpointWal();
+      lock.release();
+    };
 
     try {
       const manifest = assessWorkspace(this.workspaceRoot);
@@ -271,54 +281,64 @@ export class AstGraphIndexer {
         const tsBatch = this.tsAdapter.extract(this.workspaceRoot);
         if (tsBatch.files.length > 0 || tsBatch.nodes.length > 0) {
           this.db.applyBatch(tsBatch, true);
+          lock.heartbeat();
         }
 
         const tfBatch = this.tfAdapter.extract(this.workspaceRoot);
         if (tfBatch.files.length > 0 || tfBatch.nodes.length > 0) {
           this.db.applyBatch(tfBatch, true);
+          lock.heartbeat();
         }
 
         const pyBatch = this.pyAdapter.extract(this.workspaceRoot);
         if (pyBatch.files.length > 0 || pyBatch.nodes.length > 0) {
           this.db.applyBatch(pyBatch, true);
+          lock.heartbeat();
         }
 
         const goBatch = this.goAdapter.extract(this.workspaceRoot);
         if (goBatch.files.length > 0 || goBatch.nodes.length > 0) {
           this.db.applyBatch(goBatch, true);
+          lock.heartbeat();
         }
 
         const sqlBatch = this.sqlAdapter.extract(this.workspaceRoot);
         if (sqlBatch.files.length > 0 || sqlBatch.nodes.length > 0) {
           this.db.applyBatch(sqlBatch, true);
+          lock.heartbeat();
         }
 
         const webBatch = this.webAdapter.extract(this.workspaceRoot);
         if (webBatch.files.length > 0 || webBatch.nodes.length > 0) {
           this.db.applyBatch(webBatch, true);
+          lock.heartbeat();
         }
 
         const dockerBatch = this.dockerAdapter.extract(this.workspaceRoot);
         if (dockerBatch.files.length > 0 || dockerBatch.nodes.length > 0) {
           this.db.applyBatch(dockerBatch, true);
+          lock.heartbeat();
         }
 
         const contractBatch = this.contractAdapter.extract(this.workspaceRoot);
         if (contractBatch.files.length > 0 || contractBatch.nodes.length > 0) {
           this.db.applyBatch(contractBatch, true);
+          lock.heartbeat();
         }
 
         const rustBatch = this.rustAdapter.extract(this.workspaceRoot);
         if (rustBatch.files.length > 0 || rustBatch.nodes.length > 0) {
           this.db.applyBatch(rustBatch, true);
+          lock.heartbeat();
         }
 
         const polyglotBatch = this.polyglotAdapter.extract(this.workspaceRoot);
         if (polyglotBatch.files.length > 0 || polyglotBatch.nodes.length > 0) {
           this.db.applyBatch(polyglotBatch, true);
+          lock.heartbeat();
         }
 
-        if (options.exportSnapshots !== false) {
+        if (options.exportSnapshots) {
           this.db.exportGraph(path.dirname(this.db.dbPath));
         }
 
@@ -357,6 +377,13 @@ export class AstGraphIndexer {
         options.targetPaths && options.targetPaths.length > 0
           ? options.targetPaths.map((p) => this.normalizeRelPath(p))
           : this.discoverAllCandidateFiles().map((p) => this.normalizeRelPath(p));
+      // Explicit targets (hooks, daemon watchers) bypass the walkers; never index files that live in
+      // a nested worktree/submodule/clone or an excluded directory.
+      const scopedTargets = rawTargets.filter(
+        (rel) => !isPathInExcludedSubtree(path.join(this.workspaceRoot, rel), this.workspaceRoot),
+      );
+      rawTargets.length = 0;
+      rawTargets.push(...scopedTargets);
 
       const tsTargets: string[] = [];
       const tfTargets: string[] = [];
@@ -421,10 +448,12 @@ export class AstGraphIndexer {
           // Fast incremental AST + symbol-table resolution (<45ms for up to 32 files)
           const fastBatch = this.extractFastIncrementalTsBatch(tsTargets);
           this.db.applyBatch(fastBatch, true);
+          lock.heartbeat();
           filesUpdated += fastBatch.files.length;
         } else {
           const tsBatch = this.tsAdapter.extract(this.workspaceRoot, tsTargets);
           this.db.applyBatch(tsBatch, true);
+          lock.heartbeat();
           filesUpdated += tsBatch.files.length;
         }
       }
@@ -432,54 +461,63 @@ export class AstGraphIndexer {
       if (tfTargets.length > 0) {
         const tfBatch = this.tfAdapter.extract(this.workspaceRoot, tfTargets);
         this.db.applyBatch(tfBatch, true);
+        lock.heartbeat();
         filesUpdated += tfBatch.files.length;
       }
 
       if (pyTargets.length > 0) {
         const pyBatch = this.pyAdapter.extract(this.workspaceRoot, pyTargets);
         this.db.applyBatch(pyBatch, true);
+        lock.heartbeat();
         filesUpdated += pyBatch.files.length;
       }
 
       if (goTargets.length > 0) {
         const goBatch = this.goAdapter.extract(this.workspaceRoot, goTargets);
         this.db.applyBatch(goBatch, true);
+        lock.heartbeat();
         filesUpdated += goBatch.files.length;
       }
 
       if (sqlTargets.length > 0) {
         const sqlBatch = this.sqlAdapter.extract(this.workspaceRoot, sqlTargets);
         this.db.applyBatch(sqlBatch, true);
+        lock.heartbeat();
         filesUpdated += sqlBatch.files.length;
       }
 
       if (webTargets.length > 0) {
         const webBatch = this.webAdapter.extract(this.workspaceRoot, webTargets);
         this.db.applyBatch(webBatch, true);
+        lock.heartbeat();
         filesUpdated += webBatch.files.length;
       }
 
       if (dockerTargets.length > 0) {
         const dockerBatch = this.dockerAdapter.extract(this.workspaceRoot, dockerTargets);
         this.db.applyBatch(dockerBatch, true);
+        lock.heartbeat();
         filesUpdated += dockerBatch.files.length;
       }
 
       if (contractTargets.length > 0) {
         const contractBatch = this.contractAdapter.extract(this.workspaceRoot, contractTargets);
         this.db.applyBatch(contractBatch, true);
+        lock.heartbeat();
         filesUpdated += contractBatch.files.length;
       }
 
       if (rustTargets.length > 0) {
         const rustBatch = this.rustAdapter.extract(this.workspaceRoot, rustTargets);
         this.db.applyBatch(rustBatch, true);
+        lock.heartbeat();
         filesUpdated += rustBatch.files.length;
       }
 
       if (polyglotTargets.length > 0) {
         const polyglotBatch = this.polyglotAdapter.extract(this.workspaceRoot, polyglotTargets);
         this.db.applyBatch(polyglotBatch, true);
+        lock.heartbeat();
         filesUpdated += polyglotBatch.files.length;
       }
 
@@ -505,7 +543,7 @@ export class AstGraphIndexer {
         manifest,
       };
     } finally {
-      releaseLock?.();
+      releaseLock();
     }
   }
 

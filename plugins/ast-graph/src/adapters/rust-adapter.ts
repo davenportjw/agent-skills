@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CompilerAdapter, CompilerGraphBatch, EdgeKind, GraphEdgeRecord, GraphFileRecord, GraphNodeRecord, NodeKind } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 function sha256Hex(s: string): string {
   return crypto.createHash('sha256').update(s).digest('hex');
@@ -342,6 +343,7 @@ export class RustCompilerAdapter implements CompilerAdapter {
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(full)) continue;
           walk(full);
         } else if (entry.isFile() && this.supportsFile(full)) {
           results.push(full);

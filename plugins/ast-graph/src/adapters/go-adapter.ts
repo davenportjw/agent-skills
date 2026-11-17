@@ -10,6 +10,7 @@ import type {
   GraphNodeRecord,
   ScipSymbolUri,
 } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 function findGoClosingBrace(lines: string[], startLineIdx: number): number {
   let depth = 0;
@@ -58,6 +59,52 @@ function computeGoComplexity(bodyLines: string[]): number {
   return c;
 }
 
+/**
+ * Candidate type identifiers in a Go expression or statement. String/rune literals are stripped,
+ * selector members of local values (`r.Config`) are ignored, while package-qualified names
+ * (`router.Proxy`) yield the bare type name. Callers resolve names against declared types only,
+ * so builtins and locals never produce edges.
+ */
+export function goTypeIdentifiers(
+  text: string,
+  receiverVar?: string,
+): { name: string; composite: boolean; typeContext: boolean }[] {
+  const cleaned = text
+    .replace(/\/\/.*$/, '')
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/`[^`]*`/g, '``')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  const out: { name: string; composite: boolean; typeContext: boolean }[] = [];
+  const seen = new Set<string>();
+  const re = /(?:\b([A-Za-z_][A-Za-z0-9_]*)\.)?\b([A-Za-z_][A-Za-z0-9_]*)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(cleaned)) !== null) {
+    const qualifier = m[1];
+    const name = m[2]!;
+    const start = m.index + (qualifier ? qualifier.length + 1 : 0);
+    // Member access on a value (`x.Field`) unless the qualifier looks like a package (lowercase,
+    // not the receiver). Exported-only for qualified names since other packages can't see others.
+    if (qualifier) {
+      if (qualifier === receiverVar || !/^[a-z]/.test(qualifier) || !/^[A-Z]/.test(name)) continue;
+    } else if (start > 0 && cleaned[start - 1] === '.') {
+      continue;
+    }
+    const after = cleaned.slice(m.index + m[0].length);
+    const composite = /^\s*(?:\[[^\]]*\])?\s*\{/.test(after);
+    // Skip calls of same-named functions (`Foo(` where Foo is a func); conversions of types are kept
+    // by the caller only if the name resolves to a declared type.
+    const before = cleaned.slice(0, m.index).trimEnd();
+    const typeContext =
+      composite ||
+      /(?:\*|\]|\.\(|\bnew\(|\bvar\s+[A-Za-z0-9_, ]+|\bcase|\bchan|\bfunc\s*\([^)]*\)?)$/.test(before);
+    const key = `${name}|${composite}|${typeContext}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, composite, typeContext });
+  }
+  return out;
+}
+
 export class GoCompilerAdapter implements CompilerAdapter {
   public readonly name = 'go';
   public readonly languages = ['go', 'templ'] as const;
@@ -99,6 +146,7 @@ export class GoCompilerAdapter implements CompilerAdapter {
         if (skipDirs.has(entry.name)) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(full)) continue;
           walk(full);
         } else if (entry.isFile()) {
           const rel = path.relative(workspaceRoot, full).split(path.sep).join('/');
@@ -178,6 +226,30 @@ export class GoCompilerAdapter implements CompilerAdapter {
     const fieldIdByStructAndName = new Map<string, ScipSymbolUri>();
     const fieldIdsByName = new Map<string, ScipSymbolUri[]>();
     const funcIdsByName = new Map<string, ScipSymbolUri[]>();
+    // Named types (structs, interfaces, defined types) by short name, with their package dir so
+    // same-package declarations win when several packages declare the same name.
+    const typeIdsByName = new Map<string, { id: ScipSymbolUri; pkgDir: string }[]>();
+    const registerType = (name: string, id: ScipSymbolUri, pkgDir: string): void => {
+      const list = typeIdsByName.get(name) ?? [];
+      if (!list.some((t) => t.id === id)) list.push({ id, pkgDir });
+      typeIdsByName.set(name, list);
+    };
+    const resolveType = (name: string, pkgDir: string): ScipSymbolUri | undefined => {
+      const list = typeIdsByName.get(name);
+      if (!list || list.length === 0) return undefined;
+      return (list.find((t) => t.pkgDir === pkgDir) ?? list[0])!.id;
+    };
+    // Deferred type usages from struct fields / interface method signatures (resolved after pass 1,
+    // since the referenced type may be declared in a file that is parsed later).
+    const pendingTypeRefs: {
+      srcId: ScipSymbolUri;
+      typeExpr: string;
+      pkgDir: string;
+      filePath: string;
+      line: number;
+      usage: string;
+    }[] = [];
+    const pendingReceiverContains: { recvType: string; fnId: ScipSymbolUri; pkgDir: string; filePath: string; line: number }[] = [];
 
     interface ParsedCallable {
       id: ScipSymbolUri;
@@ -190,6 +262,7 @@ export class GoCompilerAdapter implements CompilerAdapter {
       endLine: number;
       isTest: boolean;
       bodyLines: string[];
+      pkgDir: string;
     }
     const callables: ParsedCallable[] = [];
 
@@ -342,6 +415,7 @@ export class GoCompilerAdapter implements CompilerAdapter {
                 endLine,
                 isTest: false,
                 bodyLines: bodySlice,
+                pkgDir,
               });
             }
           }
@@ -350,8 +424,20 @@ export class GoCompilerAdapter implements CompilerAdapter {
       }
 
       // Parse Go declarations in `.go` files
+      let inTypeBlock = false;
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]!;
+        const rawDeclLine = lines[i]!;
+        if (/^\s*type\s*\(\s*(?:\/\/.*)?$/.test(rawDeclLine)) {
+          inTypeBlock = true;
+          continue;
+        }
+        if (inTypeBlock && /^\s*\)\s*$/.test(rawDeclLine)) {
+          inTypeBlock = false;
+          continue;
+        }
+        // Inside `type ( ... )` each spec is parsed as if written `type Name ...`.
+        const line =
+          inTypeBlock && /^\s*[A-Za-z_]/.test(rawDeclLine) ? `type ${rawDeclLine.trim()}` : rawDeclLine;
 
         // 1. Struct definition: `type Foo struct {` or `type Foo[T any] struct {`
         const structMatch = line.match(/^\s*type\s+([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s+struct\s*\{/);
@@ -361,6 +447,7 @@ export class GoCompilerAdapter implements CompilerAdapter {
           const endLine = findGoClosingBrace(lines, i);
           const structId = `scip-go gomod ${moduleName} 1.0.0 ${relPath}/${structName}#`;
           structIdByName.set(structName, structId);
+          registerType(structName, structId, pkgDir);
 
           if (includeFile) {
             addNode({
@@ -390,6 +477,17 @@ export class GoCompilerAdapter implements CompilerAdapter {
             const fLine = lines[fIdx]!.replace(/\/\/.*$/, '').trim();
             if (!fLine || fLine.startsWith('}') || fLine.startsWith('{')) continue;
             const fieldMatch = fLine.match(/^([A-Za-z0-9_]+)\s+([^\s`]+)(?:\s+`([^`]*)`)?/);
+            const embeddedMatch = !fieldMatch ? fLine.match(/^\*?((?:[A-Za-z0-9_]+\.)?[A-Z][A-Za-z0-9_]*)\s*(?:`[^`]*`)?$/) : null;
+            if (embeddedMatch && includeFile) {
+              pendingTypeRefs.push({
+                srcId: structId,
+                typeExpr: embeddedMatch[1]!,
+                pkgDir,
+                filePath: relPath,
+                line: fIdx + 1,
+                usage: 'embedded',
+              });
+            }
             if (fieldMatch) {
               const fieldName = fieldMatch[1]!;
               const fieldType = fieldMatch[2]!;
@@ -419,9 +517,18 @@ export class GoCompilerAdapter implements CompilerAdapter {
                   properties: { fieldType, tag: structTag },
                 });
                 addEdge(structId, fieldId, 'CONTAINS', relPath, fIdx + 1);
+                pendingTypeRefs.push({
+                  srcId: fieldId,
+                  typeExpr: fieldType,
+                  pkgDir,
+                  filePath: relPath,
+                  line: fIdx + 1,
+                  usage: 'field_type',
+                });
               }
             }
           }
+          i = Math.max(i, endLine - 1);
           continue;
         }
 
@@ -433,6 +540,7 @@ export class GoCompilerAdapter implements CompilerAdapter {
           const endLine = findGoClosingBrace(lines, i);
           const ifaceId = `scip-go gomod ${moduleName} 1.0.0 ${relPath}/${ifaceName}#`;
           structIdByName.set(ifaceName, ifaceId);
+          registerType(ifaceName, ifaceId, pkgDir);
 
           if (includeFile) {
             addNode({
@@ -483,8 +591,60 @@ export class GoCompilerAdapter implements CompilerAdapter {
                   properties: {},
                 });
                 addEdge(ifaceId, mSigId, 'CONTAINS', relPath, mIdx + 1);
+                pendingTypeRefs.push({
+                  srcId: mSigId,
+                  typeExpr: `${mMatch[2] ?? ''} ${mMatch[3] ?? ''}`,
+                  pkgDir,
+                  filePath: relPath,
+                  line: mIdx + 1,
+                  usage: 'signature',
+                });
               }
             }
+          }
+          i = Math.max(i, endLine - 1);
+          continue;
+        }
+
+        // 2b. Defined / alias types: `type Status int`, `type HandlerFunc func(...)`, `type ID = string`
+        const definedMatch = line.match(
+          /^\s*type\s+([A-Za-z0-9_]+)(?:\[[^\]]+\])?\s*(=)?\s*(?!struct\b|interface\b)([^{\s][^{]*?)\s*$/,
+        );
+        if (definedMatch && !/^\($/.test(definedMatch[3] ?? '')) {
+          const typeName = definedMatch[1]!;
+          const underlying = definedMatch[3]!.replace(/\/\/.*$/, '').trim();
+          const typeId = `scip-go gomod ${moduleName} 1.0.0 ${relPath}/${typeName}#`;
+          registerType(typeName, typeId, pkgDir);
+          if (!structIdByName.has(typeName)) structIdByName.set(typeName, typeId);
+          if (includeFile) {
+            addNode({
+              id: typeId,
+              kind: 'TypeAlias',
+              name: typeName,
+              qualifiedName: `${goPkgShort}.${typeName}`,
+              packageName: pkgName,
+              filePath: relPath,
+              language: 'go',
+              startLine: i + 1,
+              startCol: 1,
+              endLine: i + 1,
+              endCol: 1,
+              signature: `type ${typeName} ${definedMatch[2] ? '= ' : ''}${underlying}`,
+              docstring: `Go ${definedMatch[2] ? 'type alias' : 'defined type'} ${goPkgShort}.${typeName}`,
+              exported: /^[A-Z]/.test(typeName),
+              complexity: 1,
+              labels: ['TypeAlias', 'GoDefinedType'],
+              properties: { underlying },
+            });
+            addEdge(fileId, typeId, 'CONTAINS', relPath, i + 1);
+            pendingTypeRefs.push({
+              srcId: typeId,
+              typeExpr: underlying,
+              pkgDir,
+              filePath: relPath,
+              line: i + 1,
+              usage: 'underlying_type',
+            });
           }
           continue;
         }
@@ -538,8 +698,9 @@ export class GoCompilerAdapter implements CompilerAdapter {
 
             if (isTest && suiteId) {
               addEdge(suiteId, fnId, 'CONTAINS', relPath, startLine);
-            } else if (recvType && structIdByName.has(recvType)) {
-              addEdge(structIdByName.get(recvType)!, fnId, 'CONTAINS', relPath, startLine);
+            } else if (recvType) {
+              // The receiver type may be declared in a file parsed later; resolve after pass 1.
+              pendingReceiverContains.push({ recvType, fnId, pkgDir, filePath: relPath, line: startLine });
             } else {
               addEdge(fileId, fnId, 'CONTAINS', relPath, startLine);
             }
@@ -555,8 +716,24 @@ export class GoCompilerAdapter implements CompilerAdapter {
               endLine,
               isTest,
               bodyLines: bodySlice,
+              pkgDir,
             });
           }
+        }
+      }
+    }
+
+    // Pass 1b: resolve deferred receiver containment and declaration-level type usages.
+    for (const r of pendingReceiverContains) {
+      const typeId = resolveType(r.recvType, r.pkgDir);
+      const fileId = `scip-go gomod ${moduleName} 1.0.0 ${r.filePath}/`;
+      addEdge(typeId ?? fileId, r.fnId, 'CONTAINS', r.filePath, r.line);
+    }
+    for (const ref of pendingTypeRefs) {
+      for (const { name } of goTypeIdentifiers(ref.typeExpr)) {
+        const typeId = resolveType(name, ref.pkgDir);
+        if (typeId) {
+          addEdge(ref.srcId, typeId, 'REFERENCES', ref.filePath, ref.line, { usage: ref.usage, type: name });
         }
       }
     }
@@ -743,6 +920,44 @@ export class GoCompilerAdapter implements CompilerAdapter {
                 { property: memberName },
               );
             }
+          }
+        }
+
+        // 2c. Type usages: signature param/return types, composite literals (`T{`, `&T{`), conversions,
+        //     var declarations, type assertions/switches, generic instantiation. Receivers are skipped
+        //     (they are modelled as CONTAINS from the type to its methods).
+        if (offset === 0) {
+          const sigMatch = line.match(
+            /^\s*func\s+(?:\([^)]*\)\s*)?[A-Za-z0-9_]+(?:\[[^\]]+\])?\s*\(([^)]*)\)(.*)$/,
+          );
+          if (sigMatch) {
+            const params = sigMatch[1] ?? '';
+            const results = (sigMatch[2] ?? '').replace(/\{\s*$/, '');
+            for (const [expr, kind, usage] of [
+              [params, 'HAS_PARAMETER_TYPE', 'parameter_type'],
+              [results, 'RETURNS_TYPE', 'return_type'],
+            ] as const) {
+              for (const { name } of goTypeIdentifiers(expr)) {
+                const typeId = resolveType(name, callable.pkgDir);
+                if (!typeId) continue;
+                addEdge(callable.id, typeId, kind, callable.filePath, lineNo, { type: name });
+                addEdge(callable.id, typeId, 'REFERENCES', callable.filePath, lineNo, { usage, type: name });
+                if (callable.isTest) addEdge(callable.id, typeId, 'TESTS_SYMBOL', callable.filePath, lineNo);
+              }
+            }
+          }
+        } else {
+          for (const { name, composite, typeContext } of goTypeIdentifiers(line, callable.receiverVar)) {
+            // Unexported type names are commonly shadowed by same-named locals (`router := ...`),
+            // so only count them in unambiguous type positions.
+            if (/^[a-z_]/.test(name) && !typeContext) continue;
+            const typeId = resolveType(name, callable.pkgDir);
+            if (!typeId) continue;
+            addEdge(callable.id, typeId, 'REFERENCES', callable.filePath, lineNo, {
+              usage: composite ? 'composite_literal' : 'type_ref',
+              type: name,
+            });
+            if (callable.isTest) addEdge(callable.id, typeId, 'TESTS_SYMBOL', callable.filePath, lineNo);
           }
         }
 

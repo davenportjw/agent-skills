@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ProjectAssessmentManifest } from './types.js';
+import { isExcludedSubtree } from './repo-boundary.js';
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -281,6 +282,7 @@ export function assessWorkspace(workspaceRoot: string): ProjectAssessmentManifes
       if (SKIP_DIRS.has(entry.name)) continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (isExcludedSubtree(fullPath)) continue;
         walk(fullPath);
       } else if (entry.isFile()) {
         const rel = path.relative(canonicalRoot, fullPath).split(path.sep).join('/');

@@ -10,6 +10,7 @@ import type {
   GraphNodeRecord as CanonicalGraphNodeRecord,
   NodeKind,
 } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 function sha256Hex(s: string): string {
   return crypto.createHash('sha256').update(s).digest('hex');
@@ -348,6 +349,7 @@ export class PolyglotCompilerAdapter implements CompilerAdapter {
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(full)) continue;
           walk(full);
         } else if (entry.isFile() && this.supportsFile(full)) {
           results.push(full);

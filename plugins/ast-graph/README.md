@@ -56,6 +56,29 @@ Not every file type gets the same level of analysis. Here is what is supported a
 - Symbols, not string literals: use `ast-graph` for code structure and identifiers. For UI copy, log messages, or raw text searches, standard `grep -rn` is still the right tool.
 - Zero repo pollution: stores the index in `<repo>/.ast-graph/` and adds it to `.git/info/exclude` automatically so `git status` stays clean.
 
+### One Index per Repository
+
+- Each repository (and each git worktree) gets its own `<repo>/.ast-graph/ast.db`. One MCP server process serves any number of repos and opens their indexes lazily; pass `workspace` to target one explicitly.
+- Nested checkouts are never indexed into their parent: any subdirectory containing its own `.git` (worktrees under `.worktrees/`, submodules, vendored clones) is skipped, along with `node_modules`, `.git`, and `.ast-graph`.
+- Moved or renamed checkouts are rebound automatically: if `<repo>/.ast-graph/ast.db` was stamped for a different path, the derived graph is dropped and rebuilt instead of failing with `TAMPER_GUARD`. A database outside the repo's own `.ast-graph/` that belongs to another repository is still refused.
+- Single writer per repo: harnesses spawn one MCP process per session, plus hooks and CLI runs. `.ast-graph/sync.lock` records the owner's PID and a heartbeat; other processes skip syncing and answer from the last committed index (prefixed with `[index busy]`) rather than queueing or re-indexing concurrently. Locks whose owner has exited are taken over immediately; a live owner that has not heartbeated for 10 minutes is treated as hung. If no index exists yet while another process builds it, queries return `INDEX_BUILDING`.
+- Disk footprint: the WAL is checkpointed and truncated after every sync (and capped at 64 MB). `export.cypher` / `snapshot.jsonl` are only written by explicit `sync`/`export` CLI runs or `ast_sync` with `full: true`, not by background syncs.
+
+### Repo-Specific Query Aliases (`ast-graph.config.json`)
+
+The plugin ships no built-in, repo-specific aliases. To map stale names your team still uses onto current symbols, commit an `ast-graph.config.json` at the repo root:
+
+```json
+{
+  "aliases": {
+    "sanitizeDirective": ["sanitiseOutputText", "normaliseInput"],
+    "SimEngine.step": ["tick", "stepHuman"]
+  }
+}
+```
+
+Aliases are only consulted when a query has no exact match, and results are labelled as alias suggestions rather than presented as the requested symbol.
+
 ## Installation
 
 ### Claude Code

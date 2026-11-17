@@ -11,6 +11,7 @@ import type {
   NodeKind,
   ScipSymbolUri,
 } from '../types.js';
+import { isExcludedSubtree } from '../repo-boundary.js';
 
 interface ParsedTfBlock {
   blockType: 'resource' | 'data' | 'module' | 'provider' | 'variable' | 'output' | 'locals';
@@ -170,6 +171,7 @@ export class TerraformCompilerAdapter implements CompilerAdapter {
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (isExcludedSubtree(full)) continue;
           walk(full);
         } else if (entry.isFile() && this.supportsFile(entry.name)) {
           results.push(full);

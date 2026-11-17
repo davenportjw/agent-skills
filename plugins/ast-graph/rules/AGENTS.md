@@ -12,6 +12,8 @@ Always use the **AST GraphDB Plugin** (`ast-graph` MCP server or `node ~/.gemini
 - `.ast-graph/` is automatically excluded via `<repo-root>/.git/info/exclude` so git status stays clean without modifying committed `.gitignore` files.
 - When working across multiple repositories, pass `workspace: "<repo-name-or-path>"` to `ast_*` MCP tools or `--workspace <path>` to the CLI.
 - If a tool returns `NO_WORKSPACE` or `UNKNOWN_WORKSPACE`, retry with `workspace` set to one of the listed repos. Do not fall back to grep. The server never defaults to the plugin install directory.
+- Git worktrees and nested clones are separate repos with their own index: query a worktree with `workspace: "<path-to-worktree>"`; the parent index never contains `.worktrees/` files.
+- `[index busy]` means another session is re-indexing; results come from the last committed index and are safe to use. `INDEX_BUILDING` means the first index is still being built: retry the same call shortly instead of switching to grep.
 
 ## 2. Strict Anti-Chunking & AST-First Lookup Mandate
 1. **NEVER Chunk-Read or Shell-Slice Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, never page through files in 800-line chunks (`1-800`, `801-1600`, ...), and **never use bash `sed -n X,Yp`, `cat`, `head`, or `tail` via `run_command` to bypass `ast_outline` + `read_file`**.
