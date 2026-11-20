@@ -5,32 +5,28 @@ description: Multi-Repo AST & Cross-Layer Lineage GraphDB Sidecar rules for Type
 
 # AST GraphDB Traceability Rules (`ast-graph`)
 
-Always use the **AST GraphDB Plugin** (`ast-graph` MCP server or `node ~/.gemini/config/plugins/ast-graph/dist/cli.js` CLI) for code navigation, property read/write localization, cross-layer lineage tracing, upstream blast-radius analysis, and targeted test selection instead of blind multi-file greps or chunk-reading large files.
+Always use the **AST GraphDB Plugin** (`node ~/.gemini/config/plugins/ast-graph/dist/cli.js` CLI primary; `ast-graph` MCP server optional when mounted) for code navigation, property read/write localization, cross-layer lineage tracing, upstream blast-radius analysis, and targeted test selection instead of blind multi-file greps or paging blindly through files.
 
 ## 1. Per-Repository Isolation & Zero Cross-Contamination
 - Every repository owns its own isolated SQLite WAL database at `<repo-root>/.ast-graph/ast.db` and assessment manifest at `<repo-root>/.ast-graph/manifest.json`.
 - `.ast-graph/` is automatically excluded via `<repo-root>/.git/info/exclude` so git status stays clean without modifying committed `.gitignore` files.
-- When working across multiple repositories, pass `workspace: "<repo-name-or-path>"` to `ast_*` MCP tools or `--workspace <path>` to the CLI.
-- If a tool returns `NO_WORKSPACE` or `UNKNOWN_WORKSPACE`, retry with `workspace` set to one of the listed repos. Do not fall back to grep. The server never defaults to the plugin install directory.
-- Git worktrees and nested clones are separate repos with their own index: query a worktree with `workspace: "<path-to-worktree>"`; the parent index never contains `.worktrees/` files.
+- Always pass `--workspace <repo-path>` to the CLI (or `workspace: "<repo-name-or-path>"` if using MCP). Git worktrees and nested clones are separate repos with their own index: pass the worktree path as `--workspace <path-to-worktree>`; the parent index never contains `.worktrees/` files.
 - `[index busy]` means another session is re-indexing; results come from the last committed index and are safe to use. `INDEX_BUILDING` means the first index is still being built: retry the same call shortly instead of switching to grep.
+- If an MCP call returns `NO_WORKSPACE` or `UNKNOWN_WORKSPACE`, retry with `--workspace` via CLI or the listed repo name. Do not fall back to grep.
 
-## 2. Strict Anti-Chunking & AST-First Lookup Mandate
-1. **NEVER Chunk-Read or Shell-Slice Large Files**: Never call `view_file` / `read_file` without `StartLine` and `EndLine` on files larger than 250 lines, never page through files in 800-line chunks (`1-800`, `801-1600`, ...), and **never use bash `sed -n X,Yp`, `cat`, `head`, or `tail` via `run_command` to bypass `ast_outline` + `read_file`**.
-2. **Sequential AST-First Lookup (No Regex Structural Outlines)**: Run `ast_symbol`, `ast_refs`, `ast_outline`, or `ast_search` **first** instead of `grep -n "function|class|interface|def "`. Read the `=== TARGET SUMMARY ===` block directly under the header line for exact `filePath#L<start>-L<end>` spans, then call `read_file` on only that exact line range (`<= 250` lines).
-3. **Zero-Lookup Turn-1 Invocation (Call Directly Without Schema Reads)**:
-   - **MCP (`call_mcp_tool` with `ServerName: "ast-graph_ast-graph"`, no schema read needed)**:
-     - `ToolName: "ast_outline"`, `Arguments: { "filePaths": ["path/a.ts", "path/b.ts"], "filter": "optional", "workspace": "<repo>" }`
-     - `ToolName: "ast_search"`, `Arguments: { "queries": ["symA", "symB"], "kind": "optional", "workspace": "<repo>" }`
-     - `ToolName: "ast_symbol"`, `Arguments: { "queries": ["symA", "symB"], "workspace": "<repo>" }`
-     - `ToolName: "ast_refs"`, `Arguments: { "targets": ["propOrSymbol"], "workspace": "<repo>" }`
-     - `ToolName: "ast_blast_radius"`, `Arguments: { "target": "symOrFile", "workspace": "<repo>" }`
-     - `ToolName: "ast_tests_for"`, `Arguments: { "target": "symOrFile", "workspace": "<repo>" }`
-     - `ToolName: "ast_lineage"`, `Arguments: { "target": "POST /api/route or Schema", "workspace": "<repo>" }`
-   - **CLI in `run_command` (when chaining inside a shell command)**:
-     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline <file1> [file2...] [--filter <kw>] --workspace <repo>`
-     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <sym1> [sym2...] --workspace <repo>`
-     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js search <q1> [q2...] --workspace <repo>`
-     - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js refs <prop> --workspace <repo>`
-4. **Targeted Test Selection**: Before running a full test suite, run `ast_tests_for` or `ast_blast_radius` to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, or `go test ...`).
-5. **Batch Symbols, Grep Literals Only**: For several identifiers, pass `queries: [...]` / `filePaths: [...]` (or multiple CLI args) in a single call instead of `grep "a\|b\|c"`. Reserve `grep -rn` / `rg` strictly for string literals, UI copy, CSS values, and log text that are not code symbols.
+## 2. AST-First Lookup & Smart Read Sizing
+1. **AST-First Lookup (No Regex Structural Outlines)**: Run `outline`, `symbol`, `refs`, or `search` **first** instead of `grep -n "function|class|interface|def "`, and never use bash `sed -n X,Yp`, `cat`, `head`, or `tail` to slice source files when `read_file` with `StartLine`/`EndLine` works directly.
+2. **Size `read_file` to the Task (No Blind Chunking, No 250-Line Micro-Slicing Loops)**:
+   - **Targeted edits (default)**: Read the `=== TARGET SUMMARY ===` spans from `outline`/`symbol`/`refs`, then call `read_file` on just that exact symbol span (typically `<= 250` lines). Never call `read_file` without `StartLine`/`EndLine` on large files (`> 250` lines) just to scan them.
+   - **Coupled visual/procedural files & long symbols (`> 250` lines)**: When authoring or debugging tightly coupled code where global context matters (e.g., Three.js scenes, shaders/TSL, Blender procedural builders, large render/layout pipelines, or single functions/modules longer than 250 lines), **read the full symbol or up to `<= 800` contiguous lines in one `read_file` call** after outlining. Never chop one file into dozens of sequential 250-line micro-reads (`1-250`, `251-500`, `501-750`, ...).
+3. **Primary Invocation — CLI via `run_command` (Works Universally in Solo Sessions, Subagents, and Native Swarm Workers)**:
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline <file1> [file2...] [--filter <kw>] [--limit <n>] --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <sym1> [sym2...] --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js search <q1> [q2...] [--kind <kind>] --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js refs <prop1> [prop2...] --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js blast <symOrFile> --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests <symOrFile> --workspace <repo>`
+   - `node ~/.gemini/config/plugins/ast-graph/dist/cli.js lineage <routeOrSchema> --workspace <repo>`
+   - *(If the repo defines `npm run ast:query`, that wraps the same CLI; in sessions where `call_mcp_tool` is mounted on `ast-graph_ast-graph`, `ast_outline`/`ast_symbol`/`ast_search`/`ast_refs`/`ast_blast_radius`/`ast_tests_for`/`ast_lineage` remain available as a secondary interface with no schema read needed.)*
+4. **Targeted Test Selection**: Before running a full test suite, run `tests <symOrFile>` (or `blast <symOrFile>`) to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, `go test ...`, or `cargo test ...`).
+5. **Batch Symbols, Grep Literals Only**: Pass multiple targets in one CLI call (`outline f1 f2`, `symbol s1 s2`, `search q1 q2`, `refs p1 p2`) instead of `grep "a\|b\|c"`. Reserve `grep -rn` / `rg` strictly for string literals, UI copy, CSS values, and log text that are not code symbols.

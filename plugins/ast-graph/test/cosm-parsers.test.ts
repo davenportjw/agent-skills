@@ -449,6 +449,154 @@ describe('cosm parser evaluations, upgrades, and polyglot ports', () => {
     expect(testNode).toBeDefined();
   });
 
+  it('extracts Rust inline #[cfg(test)] mod tests with TESTS_FILE/TESTS_SYMBOL edges and cargo test selection', () => {
+    const ws = makeTempWorkspace('ast-rust-inline-tests-');
+    fs.mkdirSync(path.join(ws, 'crates', 'sensor', 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ws, 'crates', 'sensor', 'src', 'stereo.rs'),
+      [
+        'pub struct StereoConfig {',
+        '    pub fps: u32,',
+        '}',
+        '',
+        'impl StereoConfig {',
+        '    pub fn default_200hz() -> Self {',
+        '        Self { fps: 200 }',
+        '    }',
+        '}',
+        '',
+        'pub fn compute_skew(a: i64, b: i64) -> i64 {',
+        '    (a - b).abs()',
+        '}',
+        '',
+        '#[cfg(test)]',
+        'mod tests {',
+        '    use super::*;',
+        '',
+        '    #[test]',
+        '    fn builds_default_200hz_config() {',
+        '        let cfg = StereoConfig::default_200hz();',
+        '        assert_eq!(cfg.fps, 200);',
+        '    }',
+        '',
+        '    #[tokio::test]',
+        '    async fn computes_frame_skew() {',
+        '        assert_eq!(compute_skew(10, 4), 6);',
+        '    }',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const dbPath = path.join(ws, '.ast-graph', 'ast.db');
+    const db = new AstGraphDatabase(dbPath);
+    try {
+      const indexer = new AstGraphIndexer(ws, db);
+      indexer.syncWorkspace({ full: true });
+
+      const fileTests = db.getTestsForChange('crates/sensor/src/stereo.rs');
+      const names = fileTests.directTests.map((t) => t.name);
+      expect(names).toContain('builds_default_200hz_config');
+      expect(names).toContain('computes_frame_skew');
+      expect(fileTests.vitestCommand).toContain('cargo test -- ');
+      expect(fileTests.vitestCommand).toContain('builds_default_200hz_config');
+      expect(fileTests.vitestCommand).toContain('computes_frame_skew');
+
+      // Associated Type::method() call links directly to the struct/method
+      const cfgTests = db.getTestsForChange('StereoConfig');
+      expect(cfgTests.directTests.map((t) => t.name)).toContain('builds_default_200hz_config');
+      expect(cfgTests.vitestCommand).toBe('cargo test builds_default_200hz_config');
+
+      const fnTests = db.getTestsForChange('compute_skew');
+      expect(fnTests.directTests.map((t) => t.name)).toContain('computes_frame_skew');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('handles Rust single-line fns, helper exclusion, cfg(all(test,...)), cfg(feature="test-utils"), and exact inner line numbers', () => {
+    const ws = makeTempWorkspace('ast-rust-edge-cases-');
+    fs.mkdirSync(path.join(ws, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ws, 'src', 'lib.rs'),
+      [
+        'pub struct Parser;',                                      // L1
+        'impl Parser {',                                           // L2
+        '    pub fn new() -> Self { Self }',                       // L3
+        '    pub fn run(&self) -> usize { 1 }',                    // L4
+        '}',                                                       // L5
+        'pub fn helper_free() -> usize { 42 }',                    // L6
+        '',                                                        // L7
+        '#[cfg(feature = "test-utils")]',                          // L8
+        'pub mod fixtures {',                                      // L9
+        '    pub fn build_fixture() -> usize { 7 }',               // L10
+        '}',                                                       // L11
+        '',                                                        // L12
+        '#[cfg(test)]',                                            // L13
+        'mod tests { // inline comment on open brace',             // L14
+        '    use super::*;',                                       // L15
+        '    fn make() -> Parser { Parser::new() }',               // L16
+        '    #[test]',                                             // L17
+        '    fn parses_one() { assert_eq!(make().run(), 1); }',    // L18
+        '}',                                                       // L19
+        '',                                                        // L20
+        '#[cfg(all(test, feature = "std"))]',                      // L21
+        'mod extra_checks {',                                      // L22
+        '    use super::*;',                                       // L23
+        '    #[test]',                                             // L24
+        '    fn slow_case() { assert_eq!(helper_free(), 42); }',   // L25
+        '}',                                                       // L26
+      ].join('\n'),
+      'utf8',
+    );
+
+    const dbPath = path.join(ws, '.ast-graph', 'ast.db');
+    const db = new AstGraphDatabase(dbPath);
+    try {
+      const indexer = new AstGraphIndexer(ws, db);
+      indexer.syncWorkspace({ full: true });
+
+      const outline = db.getFileOutline('src/lib.rs', { limit: 100 });
+      const byName = new Map(outline.symbols.map((s) => [s.name, s]));
+
+      // Single-line helper_free must NOT swallow subsequent mods
+      expect(byName.get('helper_free')?.startLine).toBe(6);
+      expect(byName.get('helper_free')?.endLine).toBe(6);
+
+      // Exact inner line numbers even with trailing comment on `mod tests {`
+      expect(byName.get('make')?.kind).toBe('Function');
+      expect(byName.get('make')?.startLine).toBe(16);
+      expect(byName.get('make')?.endLine).toBe(16);
+      expect(byName.get('parses_one')?.kind).toBe('TestCase');
+      expect(byName.get('parses_one')?.startLine).toBe(18);
+      expect(byName.get('parses_one')?.endLine).toBe(18);
+
+      // cfg(feature = "test-utils") is NOT a TestSuite; cfg(all(test, ...)) IS a TestSuite
+      expect(byName.get('fixtures')?.kind).toBe('Namespace');
+      expect(byName.get('extra_checks')?.kind).toBe('TestSuite');
+      expect(byName.get('slow_case')?.kind).toBe('TestCase');
+
+      // `tests Parser` must select real TestCase `parses_one` transitively via `make`, NOT helper `make`
+      const parserTests = db.getTestsForChange('Parser');
+      const parserTestCaseNames = [
+        ...parserTests.directTests.filter((t) => t.kind === 'TestCase').map((t) => t.name),
+        ...parserTests.transitiveTests.filter((t) => t.kind === 'TestCase').map((t) => t.name),
+      ];
+      expect(parserTestCaseNames).toContain('parses_one');
+      expect(parserTests.vitestCommand).toBe('cargo test parses_one');
+      expect(parserTests.vitestCommand).not.toContain('make');
+
+      // File-level tests must only include real TestCases, never helpers or non-test fixtures
+      const fileTests = db.getTestsForChange('src/lib.rs');
+      expect(fileTests.vitestCommand).toContain('parses_one');
+      expect(fileTests.vitestCommand).toContain('slow_case');
+      expect(fileTests.vitestCommand).not.toContain('make');
+      expect(fileTests.vitestCommand).not.toContain('fixtures');
+    } finally {
+      db.close();
+    }
+  });
+
   it('ports Polyglot adapter across Java, Kotlin, C#, Ruby, Elixir, PHP, C++, Swift, Zig, and WASM/WIT', () => {
     const ws = makeTempWorkspace('ast-polyglot-cosm-');
 

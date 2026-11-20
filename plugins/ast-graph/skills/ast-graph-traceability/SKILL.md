@@ -32,7 +32,7 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
    - Parses `.proto` (`service`, `rpc`, `message` fields, `enum`, `google.api.http` REST bindings -> `HANDLES_ROUTE`, `VALIDATES_SCHEMA`, `EMITS_SCHEMA`) and `.graphql` / `.gql` (`type`, `interface`, `input`, `enum`, `union`, `scalar`, `Query` / `Mutation` / `Subscription` operations) with multi-line block spans.
 8. **Rust (`scip-rust`)**:
    - Parses `.rs` files using a lifetime- (`'a`, `'static`), char-literal- (`'{'`), raw-string- (`r#"..."#`), and comment-safe brace scanner.
-   - Extracts `struct` + fields, `enum`, `trait`, `impl Trait for Type` (`IMPLEMENTS`), `fn`, `macro_rules!`, `const`/`static`, `type`, `#[test]` / `#[tokio::test]` (`cargo test`), Actix-web & Axum routes (`HANDLES_ROUTE`), `std::env::var` (`CONFIGURES_ENV`), and `sqlx::query!` SQL table references (`REFERENCES`).
+   - Extracts `struct` + fields, `enum`, `trait`, `impl Trait for Type` (`IMPLEMENTS`), `fn`, inline `mod` blocks (including `#[cfg(test)] mod tests { ... }` `TestSuite` + inner `#[test]` / `#[tokio::test]` / `#[rstest]` `TestCase` nodes with `TESTS_FILE` and `TESTS_SYMBOL` edges for `cargo test`), `macro_rules!`, `const`/`static`, `type`, Actix-web & Axum routes (`HANDLES_ROUTE`), `std::env::var` (`CONFIGURES_ENV`), and `sqlx::query!` SQL table references (`REFERENCES`).
 9. **Polyglot Structural & Cross-Layer Adapter (`scip-polyglot`)**:
    - Supports **Java** (`.java`), **Kotlin** (`.kt`, `.kts`), **C#** (`.cs`), **Ruby** (`.rb`), **Elixir** (`.ex`, `.exs`), **PHP** (`.php`), **C/C++** (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`), **Swift** (`.swift`), **Zig** (`.zig`), and **WebAssembly / WIT** (`.wat`, `.wit`).
    - Computes multi-line 1-based `startLine`–`endLine` spans (brace-delimited, `def`/`class`/`module ... end` for Ruby/Elixir, and S-expression parens for WAT) and links Spring Boot / ASP.NET / Rails / Phoenix / Laravel / Symfony routes (`HANDLES_ROUTE`), JPA / EF / ActiveRecord / Ecto ORM tables (`REFERENCES`), and environment variables (`CONFIGURES_ENV`).
@@ -56,7 +56,30 @@ The **AST GraphDB Plugin** (`@agent-skills/ast-graph`) provides an isolated, tam
 
 ---
 
-## 3. MCP Tools (`ast-graph`)
+## 3. Primary CLI Usage (Fast-Path, Universal Across Solo, Subagents & Swarms)
+
+Read-only CLI queries skip loading TypeScript/adapters whenever the SQLite index is clean on the current Git HEAD (~150–180 ms cold start vs ~650 ms before) and work identically in solo sessions, subagents, and native swarm workers:
+
+```bash
+# Assess a repository and write <repo>/.ast-graph/manifest.json
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js assess --workspace /path/to/repo
+
+# Full or incremental sync
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js sync --workspace /path/to/repo
+
+# Query symbols, property references, file outlines, search, lineage, blast radius, and tests
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline <File1> [File2...] [--filter <kw>] [--limit <n>] --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <Sym1> [Sym2...] --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js search <Q1> [Q2...] [--kind <kind>] --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js refs <Prop1> [Prop2...] --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js lineage <SchemaOrRouteOrTable> --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js blast <SymbolOrFile> --workspace /path/to/repo
+node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests <SymbolOrFile> --workspace /path/to/repo
+```
+
+---
+
+## 4. Optional MCP Tools (`ast-graph`)
 
 All MCP tools accept an optional `workspace` parameter (repository path or registered repository name):
 
@@ -94,7 +117,7 @@ If none of these match, the tool returns `NO_WORKSPACE` with the list of known r
 
 - Every text result is **at most about 3.8 KB** (4.6 KB for multi-target batches), so agent harnesses keep it inline instead of spilling it to a file.
 - Line 1 is the header (`[repo=…] [AST …]`). It is followed **immediately** by the `=== TARGET SUMMARY ===` block (top match, exact `filePath#L<start>-L<end>`, recommended `read_file` range or test command), then `--- details ---`.
-- When a top-level symbol in `ast_outline` or `ast_symbol` is a large container (`> 250` lines, such as `createApp` or `App`), `Recommended Action` automatically points to the first bounded inner symbol (`<= 250` lines) or a capped 200-line window and advises narrowing with `filter`.
+- When a top-level symbol in `outline` or `symbol` is a large container (`> 250` lines, such as `createApp` or `App`), `Recommended Action` points to the first bounded inner symbol (`<= 250` lines) or a capped 200-line window for targeted edits. For coupled visual/procedural files (Three.js scenes, shaders, Blender builders) or long symbols where holistic context is needed, agents may read the full symbol or up to `<= 800` contiguous lines in one `read_file` call instead of repeating 250-line micro-reads.
 - When results exceed the budget, only detail lines are dropped. The footer says how many lines were omitted and where the full output was saved: `<repo>/.ast-graph/last/<command>.txt`.
 - `ast_outline` prints the file path once in the header. Detail lines carry only `L<start>-L<end>` spans. `ast_search` groups hits under each file path and ranks primary source code symbols ahead of `StylesheetSection` rules, docs/mockups, and test files.
 - Default limits: search 15, outline 65 (30 per file in batches), refs 25 per category, symbol 20. Narrow with `filter`, `kind`, or `limit` rather than raising the limit.
@@ -104,23 +127,3 @@ If none of these match, the tool returns `NO_WORKSPACE` with the list of known r
   - `Kinds present in this repo: …` for an unmatched `kind`.
   - A `grep -rn` recommendation for string literals / UI copy / log text, which are not symbols.
 - TypeScript class members report `exp` only when public. `private`, `protected`, and `#private` members are not marked exported.
-
----
-
-## 4. CLI Usage
-
-```bash
-# Assess a repository and write <repo>/.ast-graph/manifest.json
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js assess --workspace /path/to/repo
-
-# Full or incremental sync
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js sync --workspace /path/to/repo
-
-# Query symbols, property references, file outlines, lineage, blast radius, and tests
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js symbol <SymbolName> --workspace /path/to/repo
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js refs <PropertyName> --workspace /path/to/repo
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline <FilePath> --workspace /path/to/repo
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js lineage <SchemaOrRouteOrTable> --workspace /path/to/repo
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js blast-radius <SymbolOrFile> --workspace /path/to/repo
-node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests-for <SymbolOrFile> --workspace /path/to/repo
-```

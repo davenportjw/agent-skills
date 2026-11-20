@@ -10,7 +10,7 @@ process.emitWarning = ((warning, ...args) => {
     return origEmitWarning(warning, ...args);
 });
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
-import { buildFallbackStructuralOutline } from './adapters/web-adapter.js';
+import { buildFallbackStructuralOutline } from './adapters/fallback-outline.js';
 import { canonicalizeWorkspaceRoot, computeRepoId } from './assessor.js';
 /**
  * Optional per-repo concept aliases, committed at `<repo>/ast-graph.config.json`:
@@ -1812,8 +1812,12 @@ export class AstGraphDatabase {
             return `uv run pytest ${testFilePaths.filter((f) => f.endsWith('.py')).join(' ')}`;
         }
         if (hasRs) {
-            const rsTests = testCaseNames.slice(0, 5);
-            return rsTests.length > 0 ? `cargo test ${rsTests.join(' ')}` : 'cargo test';
+            const rsTests = [...new Set(testCaseNames.filter((n) => n !== 'tests'))].slice(0, 5);
+            if (rsTests.length === 1)
+                return `cargo test ${rsTests[0]}`;
+            if (rsTests.length > 1)
+                return `cargo test -- ${rsTests.join(' ')}`;
+            return 'cargo test';
         }
         if (hasRb) {
             return `bundle exec rspec ${testFilePaths.filter((f) => f.endsWith('.rb')).join(' ')}`;
@@ -1909,7 +1913,11 @@ export class AstGraphDatabase {
                 ...transitiveTests.map((t) => t.filePath),
             ]),
         ];
-        const vitestCommand = this.formatTestCommand(testFiles, [...directTests.map((d) => d.name), ...transitiveTests.map((t) => t.name)]);
+        const testCaseNames = [
+            ...directTests.filter((d) => d.kind === 'TestCase').map((d) => d.name),
+            ...transitiveTests.filter((t) => t.kind === 'TestCase').map((t) => t.name),
+        ];
+        const vitestCommand = this.formatTestCommand(testFiles, testCaseNames);
         const latencyMs = performance.now() - t0;
         this.recordQueryTelemetry('getTestsForChange', target, latencyMs, directTests.length + transitiveTests.length);
         return {

@@ -2,10 +2,72 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { assessWorkspace, canonicalizeWorkspaceRoot, pruneGlobalRegistry, unregisterWorkspaceFromGlobalRegistry, } from './assessor.js';
+import { assessWorkspace, canonicalizeWorkspaceRoot, pruneGlobalRegistry, resolveGitHeadSignature, unregisterWorkspaceFromGlobalRegistry, } from './assessor.js';
+import { isWorkspaceFilesystemClean } from './candidate-files.js';
 import { AstGraphDatabase } from './db.js';
-import { AstGraphIndexer } from './indexer.js';
-import { analyzeGraph, runBenchmark } from './analyzer.js';
+import { activeLockOwner, syncLockPath } from './sync-lock.js';
+/**
+ * Lightweight zero-TypeScript freshness check for read-only CLI queries.
+ * When the SQLite index is already populated, schema-current, on the same Git HEAD, and free of
+ * modified/added/deleted indexable files, the CLI skips importing `indexer.js` (and `typescript`),
+ * cutting cold-start query time from ~650ms down to ~150ms.
+ */
+function checkFastIndexClean(workspaceRoot, db, outlineHint) {
+    db.verifyRepoBinding(workspaceRoot);
+    const tracked = db.getTrackedFilesMap();
+    const owner = activeLockOwner(syncLockPath(db.dbPath));
+    if (owner && owner.pid !== process.pid) {
+        if (tracked.size === 0) {
+            throw new Error(`INDEX_BUILDING: another process (pid ${owner.pid}) is building the index for ${workspaceRoot}` +
+                ` (started ${Math.round((Date.now() - owner.startedAt) / 1000)}s ago); retry shortly.`);
+        }
+        return { status: 'busy', lockedBy: owner };
+    }
+    if (tracked.size === 0 || db.schemaRebuilt !== null) {
+        return { status: 'needs-indexer' };
+    }
+    const currentHead = resolveGitHeadSignature(workspaceRoot);
+    const storedHead = db.getMeta('last_git_head');
+    if (currentHead && currentHead !== storedHead) {
+        return { status: 'needs-indexer' };
+    }
+    // Target-scoped fast path for single-file `outline` (with strict path-segment boundary)
+    if (outlineHint) {
+        const cleanHint = outlineHint.replace(/\\/g, '/').replace(/^\.\//, '');
+        let matchedRel = null;
+        if (tracked.has(cleanHint)) {
+            matchedRel = cleanHint;
+        }
+        else {
+            const suffix = `/${cleanHint}`;
+            for (const rel of tracked.keys()) {
+                if (rel.endsWith(suffix)) {
+                    matchedRel = rel;
+                    break;
+                }
+            }
+        }
+        if (!matchedRel)
+            return { status: 'needs-indexer' };
+        const prev = tracked.get(matchedRel);
+        if (!prev)
+            return { status: 'needs-indexer' };
+        try {
+            const stat = fs.statSync(path.join(workspaceRoot, matchedRel));
+            if (Math.abs(stat.mtimeMs - prev.mtimeMs) <= 1) {
+                return { status: 'clean' };
+            }
+        }
+        catch {
+            return { status: 'needs-indexer' };
+        }
+        return { status: 'needs-indexer' };
+    }
+    // Repo-wide fast path: pure-Node filesystem scan matching all indexable files (including gitignored)
+    return isWorkspaceFilesystemClean(workspaceRoot, tracked)
+        ? { status: 'clean' }
+        : { status: 'needs-indexer' };
+}
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4319;
 async function fetchDaemonJson(method, endpointPath, body, host = DEFAULT_HOST, port = DEFAULT_PORT, connectTimeoutMs = 50, responseTimeoutMs = 2500) {
@@ -803,7 +865,7 @@ export async function executeCliCommand(rawArgs, options) {
                 return { exitCode: 0, output: formatOut('search', res), data: res };
             }
         }
-        else if (command === 'blast-radius') {
+        else if (command === 'blast-radius' || command === 'blast') {
             const target = primaryTarget;
             const hops = parseFlagValue(rawArgs, '--depth') ?? parseFlagValue(rawArgs, '--hops') ?? '3';
             const qs = new URLSearchParams({ target, hops }).toString();
@@ -812,7 +874,7 @@ export async function executeCliCommand(rawArgs, options) {
                 return { exitCode: 0, output: formatOut('blast-radius', res), data: res };
             }
         }
-        else if (command === 'tests-for') {
+        else if (command === 'tests-for' || command === 'tests') {
             const target = primaryTarget;
             const qs = new URLSearchParams({ target }).toString();
             const res = await fetchDaemonJson('GET', `/tests-for?${qs}`, undefined, host, port);
@@ -842,8 +904,16 @@ export async function executeCliCommand(rawArgs, options) {
     // Fallback to direct SQLite WAL mode access
     const db = new AstGraphDatabase(dbPath);
     try {
-        const indexer = new AstGraphIndexer(workspaceRoot, db);
+        let loadedIndexer = null;
+        const getIndexer = async () => {
+            if (!loadedIndexer) {
+                const { AstGraphIndexer } = await import('./indexer.js');
+                loadedIndexer = new AstGraphIndexer(workspaceRoot, db);
+            }
+            return loadedIndexer;
+        };
         if (command === 'sync') {
+            const indexer = await getIndexer();
             const force = rawArgs.includes('--force') || rawArgs.includes('--full');
             const syncResult = indexer.syncWorkspace({
                 full: force,
@@ -853,9 +923,35 @@ export async function executeCliCommand(rawArgs, options) {
             const data = { sync: syncResult, counts };
             return { exitCode: 0, output: JSON.stringify(data, null, 2), data };
         }
-        // Ensure graph is initialized and lazily up to date before querying (scoped for single-file outline)
+        // Ensure graph is initialized and lazily up to date before querying (scoped for single-file outline).
+        // Uses zero-TypeScript fast check when index is clean; dynamically loads AstGraphIndexer only when dirty.
         const outlineHint = command === 'outline' && rawTargets.length === 1 ? primaryTarget : undefined;
-        indexer.lazySyncIfDirty(outlineHint ? { targetFileHint: outlineHint } : undefined);
+        let indexNotice = '';
+        let indexBusyBy;
+        const fastCheck = checkFastIndexClean(workspaceRoot, db, outlineHint);
+        if (fastCheck.status === 'busy') {
+            indexBusyBy = { pid: fastCheck.lockedBy.pid, startedAt: fastCheck.lockedBy.startedAt };
+            indexNotice =
+                `[index busy] pid ${fastCheck.lockedBy.pid} is re-indexing this repo; ` +
+                    `results reflect the last committed index.\n`;
+        }
+        else if (fastCheck.status === 'needs-indexer') {
+            const indexer = await getIndexer();
+            const lazy = indexer.lazySyncIfDirty(outlineHint ? { targetFileHint: outlineHint } : undefined);
+            if (lazy.lockedBy) {
+                indexBusyBy = lazy.lockedBy;
+                indexNotice =
+                    `[index busy] pid ${lazy.lockedBy.pid} is re-indexing this repo; ` +
+                        `results reflect the last committed index.\n`;
+            }
+        }
+        const formatOutWithNotice = (cmd, payload) => {
+            if (rawJson && indexBusyBy && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                return JSON.stringify({ indexBusy: indexBusyBy, ...payload }, null, 2);
+            }
+            const formatted = formatOut(cmd, payload);
+            return !rawJson && indexNotice ? `${indexNotice}${formatted}` : formatted;
+        };
         switch (command) {
             case 'status': {
                 const counts = db.getCounts();
@@ -874,16 +970,16 @@ export async function executeCliCommand(rawArgs, options) {
                             : db.getSymbolNeighborhood(t, { limit }),
                     }));
                     const data = { batchCount: batchItems.length, batchItems };
-                    return { exitCode: 0, output: formatOut('symbol', data), data };
+                    return { exitCode: 0, output: formatOutWithNotice('symbol', data), data };
                 }
                 const query = targets[0] ?? '';
                 if (kind) {
                     const matches = db.searchSymbols(query, kind, limit);
                     const data = { query, kind, count: matches.length, matches };
-                    return { exitCode: 0, output: formatOut('symbol', data), data };
+                    return { exitCode: 0, output: formatOutWithNotice('symbol', data), data };
                 }
                 const neighborhood = db.getSymbolNeighborhood(query, { limit });
-                return { exitCode: 0, output: formatOut('symbol', neighborhood), data: neighborhood };
+                return { exitCode: 0, output: formatOutWithNotice('symbol', neighborhood), data: neighborhood };
             }
             case 'refs':
             case 'references': {
@@ -904,10 +1000,10 @@ export async function executeCliCommand(rawArgs, options) {
                         result: queryOne(t),
                     }));
                     const data = { batchCount: batchItems.length, batchItems };
-                    return { exitCode: 0, output: formatOut('refs', data), data };
+                    return { exitCode: 0, output: formatOutWithNotice('refs', data), data };
                 }
                 const data = queryOne(targets[0] ?? '');
-                return { exitCode: 0, output: formatOut('refs', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('refs', data), data };
             }
             case 'outline': {
                 const targets = rawTargets.length > 0 ? rawTargets : [''];
@@ -921,7 +1017,7 @@ export async function executeCliCommand(rawArgs, options) {
                         result: db.getFileOutline(fp, { filter, kind, exportedOnly, limit }),
                     }));
                     const data = { batchCount: batchItems.length, batchItems };
-                    return { exitCode: 0, output: formatOut('outline', data), data };
+                    return { exitCode: 0, output: formatOutWithNotice('outline', data), data };
                 }
                 const data = db.getFileOutline(targets[0] ?? '', {
                     filter,
@@ -929,25 +1025,36 @@ export async function executeCliCommand(rawArgs, options) {
                     exportedOnly,
                     limit,
                 });
-                return { exitCode: 0, output: formatOut('outline', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('outline', data), data };
             }
             case 'search': {
-                const query = primaryTarget;
+                const targets = rawTargets.length > 0 ? rawTargets : [''];
                 const kind = parseFlagValue(rawArgs, '--kind');
                 const limit = Number(parseFlagValue(rawArgs, '--limit') ?? '15');
-                const matches = db.searchSymbols(query, kind, limit);
-                const data = matches.length === 0
-                    ? {
-                        workspaceRoot,
-                        query,
-                        kind,
-                        count: 0,
-                        matches,
-                        didYouMean: db.suggestClosestSymbols(query, 6),
-                        ...(kind ? { availableKinds: db.listKindCounts() } : {}),
-                    }
-                    : { workspaceRoot, query, kind, count: matches.length, matches };
-                return { exitCode: 0, output: formatOut('search', data), data };
+                const searchOne = (query) => {
+                    const matches = db.searchSymbols(query, kind, limit);
+                    return matches.length === 0
+                        ? {
+                            workspaceRoot,
+                            query,
+                            kind,
+                            count: 0,
+                            matches,
+                            didYouMean: db.suggestClosestSymbols(query, 6),
+                            ...(kind ? { availableKinds: db.listKindCounts() } : {}),
+                        }
+                        : { workspaceRoot, query, kind, count: matches.length, matches };
+                };
+                if (targets.length > 1) {
+                    const batchItems = targets.map((q) => ({
+                        target: q,
+                        result: searchOne(q),
+                    }));
+                    const data = { batchCount: batchItems.length, batchItems };
+                    return { exitCode: 0, output: formatOutWithNotice('search', data), data };
+                }
+                const data = searchOne(targets[0] ?? '');
+                return { exitCode: 0, output: formatOutWithNotice('search', data), data };
             }
             case 'callers': {
                 const symbol = primaryTarget;
@@ -960,7 +1067,7 @@ export async function executeCliCommand(rawArgs, options) {
                     totalCallersCount: neighborhood.totalCallersCount,
                     callers: neighborhood.callers,
                 };
-                return { exitCode: 0, output: formatOut('callers', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('callers', data), data };
             }
             case 'callees': {
                 const symbol = primaryTarget;
@@ -973,36 +1080,41 @@ export async function executeCliCommand(rawArgs, options) {
                     totalCalleesCount: neighborhood.totalCalleesCount,
                     callees: neighborhood.callees,
                 };
-                return { exitCode: 0, output: formatOut('callees', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('callees', data), data };
             }
-            case 'blast-radius': {
+            case 'blast-radius':
+            case 'blast': {
                 const symbol = primaryTarget;
                 const depth = Number(parseFlagValue(rawArgs, '--depth') ?? parseFlagValue(rawArgs, '--hops') ?? '3');
                 const data = db.getBlastRadius(symbol, depth);
-                return { exitCode: 0, output: formatOut('blast-radius', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('blast-radius', data), data };
             }
-            case 'tests-for': {
+            case 'tests-for':
+            case 'tests': {
                 const symbol = primaryTarget;
                 const data = db.getTestsForChange(symbol);
-                return { exitCode: 0, output: formatOut('tests-for', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('tests-for', data), data };
             }
             case 'lineage': {
                 const target = primaryTarget;
                 const data = db.getCrossLayerLineage(target);
-                return { exitCode: 0, output: formatOut('lineage', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('lineage', data), data };
             }
             case 'path': {
                 const from = positionals[1] ?? '';
                 const to = positionals[2] ?? '';
                 const depth = Number(parseFlagValue(rawArgs, '--depth') ?? parseFlagValue(rawArgs, '--hops') ?? '6');
                 const data = db.findShortestPath(from, to, depth);
-                return { exitCode: 0, output: formatOut('path', data), data };
+                return { exitCode: 0, output: formatOutWithNotice('path', data), data };
             }
             case 'analyze': {
+                const { analyzeGraph } = await import('./analyzer.js');
                 const data = analyzeGraph(db);
                 return { exitCode: 0, output: JSON.stringify(data, null, 2), data };
             }
             case 'benchmark': {
+                const indexer = await getIndexer();
+                const { runBenchmark } = await import('./analyzer.js');
                 const data = runBenchmark(workspaceRoot, db, indexer);
                 return { exitCode: 0, output: JSON.stringify(data, null, 2), data };
             }
@@ -1029,11 +1141,11 @@ export async function executeCliCommand(rawArgs, options) {
                         'symbol <query...> [--kind <kind>] [--limit <n>] [--raw-json]',
                         'refs <propertyOrSymbol...> [--limit <n>] [--raw-json]',
                         'outline <filePath...> [--filter <substr>] [--kind <kind>] [--exported] [--limit <n>] [--raw-json]',
-                        'search <query> [--kind <kind>] [--limit <n>] [--raw-json]',
+                        'search <query...> [--kind <kind>] [--limit <n>] [--raw-json]',
                         'callers <symbol> [--limit <n>] [--raw-json]',
                         'callees <symbol> [--limit <n>] [--raw-json]',
-                        'blast-radius <symbol> [--depth <n>] [--raw-json]',
-                        'tests-for <symbol> [--raw-json]',
+                        'blast | blast-radius <symbol> [--depth <n>] [--raw-json]',
+                        'tests | tests-for <symbol> [--raw-json]',
                         'lineage <schemaOrRoute> [--raw-json]',
                         'path <fromSymbol> <toSymbol> [--depth <n>] [--raw-json]',
                         'analyze',

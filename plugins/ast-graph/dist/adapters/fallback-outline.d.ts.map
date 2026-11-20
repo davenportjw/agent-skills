@@ -1,0 +1,1 @@
+{"version":3,"file":"fallback-outline.d.ts","sourceRoot":"","sources":["../../src/adapters/fallback-outline.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,iBAAiB,EAAE,MAAM,aAAa,CAAC;AAErD;;;;GAIG;AACH,wBAAgB,8BAA8B,CAC5C,OAAO,EAAE,MAAM,EACf,OAAO,EAAE,MAAM,GACd;IAAE,QAAQ,EAAE,MAAM,CAAC;IAAC,SAAS,EAAE,MAAM,CAAC;IAAC,OAAO,EAAE,iBAAiB,EAAE,CAAA;CAAE,CAoIvE"}

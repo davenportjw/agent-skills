@@ -23,6 +23,20 @@ function normalizeCrossLayerId(id) {
 }
 const RUST_USE_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([^;]+);/;
 const RUST_MOD_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*(?:;|\{)/;
+const RUST_INLINE_MOD_RE = /^(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*\{/;
+const RUST_TEST_ATTR_RE = /^#\[(?:[\w:]+::)?(?:test|rstest)\b/;
+/**
+ * Matches `#[cfg(test)]`, `#[cfg(all(test, ...))]`, `#[cfg(any(test, ...))]` while rejecting
+ * string-literal matches like `#[cfg(feature = "test-utils")]` or negated `#[cfg(not(test))]`.
+ */
+function isCfgTestAttr(attr) {
+    const m = /^#\[cfg\(([\s\S]*)\)\]$/.exec(attr.trim());
+    if (!m)
+        return false;
+    // Strip string literals and `not(test)` clauses before checking for a standalone `test` predicate.
+    const cleaned = m[1].replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/\bnot\s*\(\s*test\s*\)/g, '');
+    return /(?:^|[(,\s])test(?=$|[),\s])/.test(cleaned);
+}
 const RUST_STRUCT_RE = /^(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)(?:\s*<[^>]*>)?\s*(?:where[^{;]+)?(?:\{([\s\S]*)\}|\(([\s\S]*)\)\s*;|\s*;)/;
 const RUST_ENUM_RE = /^(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)(?:\s*<[^>]*>)?\s*(?:where[^{]+)?\{([\s\S]*)\}/;
 const RUST_TRAIT_RE = /^(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?trait\s+([A-Za-z_]\w*)(?:\s*<[^>]*>)?(?:\s*:\s*([^{]+))?\s*\{([\s\S]*)\}/;
@@ -65,13 +79,15 @@ const RUST_CONTROL_KEYWORDS = new Set([
  */
 export function countRustBracesLine(line, inBlockComment, rawStringHashes) {
     let delta = 0;
+    let firstOpenBraceIdx = -1;
+    let lastCloseBraceIdx = -1;
     let inString = false;
     let i = 0;
     while (i < line.length) {
         if (inBlockComment) {
             const endIdx = line.indexOf('*/', i);
             if (endIdx < 0) {
-                return { delta, inBlockComment: true, rawStringHashes };
+                return { delta, firstOpenBraceIdx, lastCloseBraceIdx, inBlockComment: true, rawStringHashes };
             }
             inBlockComment = false;
             i = endIdx + 2;
@@ -81,7 +97,7 @@ export function countRustBracesLine(line, inBlockComment, rawStringHashes) {
             const closingPattern = '"' + '#'.repeat(rawStringHashes);
             const endIdx = line.indexOf(closingPattern, i);
             if (endIdx < 0) {
-                return { delta, inBlockComment: false, rawStringHashes };
+                return { delta, firstOpenBraceIdx, lastCloseBraceIdx, inBlockComment: false, rawStringHashes };
             }
             rawStringHashes = -1;
             i = endIdx + closingPattern.length;
@@ -142,14 +158,17 @@ export function countRustBracesLine(line, inBlockComment, rawStringHashes) {
             continue;
         }
         if (ch === '{') {
+            if (firstOpenBraceIdx < 0)
+                firstOpenBraceIdx = i;
             delta++;
         }
         else if (ch === '}') {
+            lastCloseBraceIdx = i;
             delta--;
         }
         i++;
     }
-    return { delta, inBlockComment, rawStringHashes };
+    return { delta, firstOpenBraceIdx, lastCloseBraceIdx, inBlockComment, rawStringHashes };
 }
 function scanRustBlocks(text, baseLineOffset = 1) {
     const lines = text.split(/\r?\n/);
@@ -177,6 +196,7 @@ function scanRustBlocks(text, baseLineOffset = 1) {
         let braceDepth = 0;
         let opened = false;
         const bodyLines = [];
+        let bodyStartLine = startLine + 1;
         let endLine = startLine;
         while (i < lines.length) {
             const line = lines[i];
@@ -189,7 +209,8 @@ function scanRustBlocks(text, baseLineOffset = 1) {
             if (!opened) {
                 headerParts.push(line.trim());
                 // Semicolon statement before any `{` (e.g. unit struct, trait method decl, use/const/type)
-                if (step.delta === 0 &&
+                if (step.firstOpenBraceIdx < 0 &&
+                    step.delta === 0 &&
                     !inBlockComment &&
                     rawStringHashes < 0 &&
                     line.replace(/\/\/.*$/, '').trim().endsWith(';')) {
@@ -197,22 +218,30 @@ function scanRustBlocks(text, baseLineOffset = 1) {
                     i++;
                     break;
                 }
-                if (braceDepth > 0) {
+                if (step.firstOpenBraceIdx >= 0) {
                     opened = true;
-                    const openBraceIdx = line.indexOf('{');
-                    if (openBraceIdx >= 0 && openBraceIdx + 1 < line.length) {
-                        const after = line.slice(openBraceIdx + 1);
-                        if (braceDepth === 0) {
-                            const closeIdx = after.lastIndexOf('}');
-                            if (closeIdx > 0)
-                                bodyLines.push(after.slice(0, closeIdx));
-                        }
-                        else {
-                            bodyLines.push(after);
-                        }
+                    if (braceDepth <= 0) {
+                        // Single-line balanced block (e.g. `fn make() -> P { P::new() }` or `#[test] fn t() { ... }`)
+                        const inner = step.lastCloseBraceIdx > step.firstOpenBraceIdx
+                            ? line.slice(step.firstOpenBraceIdx + 1, step.lastCloseBraceIdx)
+                            : '';
+                        if (inner.length > 0)
+                            bodyLines.push(inner);
+                        bodyStartLine = currentLineNo;
+                        endLine = currentLineNo;
+                        i++;
+                        break;
+                    }
+                    const after = line.slice(step.firstOpenBraceIdx + 1);
+                    if (after.length > 0) {
+                        bodyLines.push(after);
+                        bodyStartLine = currentLineNo;
+                    }
+                    else {
+                        bodyStartLine = currentLineNo + 1;
                     }
                 }
-                else if (step.delta === 0 && headerParts.length === 1 && !/^(?:pub|struct|enum|trait|impl|fn|async|unsafe|const|macro_rules)/.test(trimmed)) {
+                else if (step.delta === 0 && headerParts.length === 1 && !/^(?:pub|struct|enum|trait|impl|fn|async|unsafe|const|static|type|mod|macro_rules)/.test(trimmed)) {
                     endLine = currentLineNo;
                     i++;
                     break;
@@ -220,7 +249,7 @@ function scanRustBlocks(text, baseLineOffset = 1) {
             }
             else {
                 if (braceDepth <= 0) {
-                    const closeIdx = line.lastIndexOf('}');
+                    const closeIdx = step.lastCloseBraceIdx >= 0 ? step.lastCloseBraceIdx : line.lastIndexOf('}');
                     if (closeIdx > 0) {
                         bodyLines.push(line.slice(0, closeIdx));
                     }
@@ -245,6 +274,7 @@ function scanRustBlocks(text, baseLineOffset = 1) {
             header: fullText,
             body: bodyLines.join('\n'),
             startLine,
+            bodyStartLine,
             endLine,
             attrs: pendingAttrs,
         });
@@ -707,7 +737,7 @@ export class RustCompilerAdapter {
                         evidence: `impl ${traitRaw} for ${targetType}`,
                     });
                 }
-                const innerBlocks = scanRustBlocks(implBody, block.startLine + 1);
+                const innerBlocks = scanRustBlocks(implBody, block.bodyStartLine);
                 for (const inner of innerBlocks) {
                     const fnMatch = RUST_FN_RE.exec(inner.header);
                     if (fnMatch) {
@@ -768,6 +798,12 @@ export class RustCompilerAdapter {
                 });
                 continue;
             }
+            // Inline module block (including #[cfg(test)] mod tests { ... })
+            const inlineModMatch = RUST_INLINE_MOD_RE.exec(header);
+            if (inlineModMatch) {
+                this.extractInlineModule(inlineModMatch[1], block, fileId, fileId, relPath, isTestFile, '', nodes, edges);
+                continue;
+            }
             // Top-level Function or Test
             const fnMatch = RUST_FN_RE.exec(header);
             if (fnMatch) {
@@ -776,7 +812,7 @@ export class RustCompilerAdapter {
                 const fnRet = fnMatch[3]?.trim();
                 const isTest = isTestFile ||
                     fnName.startsWith('test_') ||
-                    block.attrs.some((a) => /^#\[(?:\w+::)?test\b/.test(a));
+                    block.attrs.some((a) => RUST_TEST_ATTR_RE.test(a));
                 const fnId = `${fileId}${fnName}().`;
                 nodes.push({
                     id: fnId,
@@ -799,6 +835,16 @@ export class RustCompilerAdapter {
                     line: block.startLine,
                     confidence: 1.0,
                 });
+                if (isTest && !isTestFile) {
+                    edges.push({
+                        sourceId: fnId,
+                        targetId: fileId,
+                        kind: 'TESTS_FILE',
+                        filePath: relPath,
+                        line: block.startLine,
+                        confidence: 0.95,
+                    });
+                }
                 // Actix / Rocket route attribute
                 for (const attr of block.attrs) {
                     const routeMatch = RUST_ACTIX_ROUTE_RE.exec(attr);
@@ -834,7 +880,98 @@ export class RustCompilerAdapter {
         }
         return { nodes, edges };
     }
-    extractFnCalls(body, callerId, fileId, relPath, baseLine, edges, isTest = false) {
+    extractInlineModule(modName, block, parentId, fileId, relPath, parentIsTest, modPathPrefix, nodes, edges) {
+        const isTestMod = parentIsTest ||
+            block.attrs.some((a) => isCfgTestAttr(a)) ||
+            modName === 'tests' ||
+            modName.endsWith('_tests');
+        const qualifiedMod = modPathPrefix ? `${modPathPrefix}::${modName}` : modName;
+        const modId = `${fileId}mod:${qualifiedMod}.`;
+        nodes.push({
+            id: modId,
+            kind: isTestMod ? 'TestSuite' : 'Namespace',
+            name: modName,
+            qualifiedName: `${relPath}::${qualifiedMod}`,
+            filePath: relPath,
+            language: 'rust',
+            startLine: block.startLine,
+            endLine: block.endLine,
+            signature: `mod ${modName}`,
+            exported: block.header.trim().startsWith('pub'),
+        });
+        edges.push({
+            sourceId: parentId,
+            targetId: modId,
+            kind: 'CONTAINS',
+            filePath: relPath,
+            line: block.startLine,
+            confidence: 1.0,
+        });
+        if (isTestMod) {
+            edges.push({
+                sourceId: modId,
+                targetId: fileId,
+                kind: 'TESTS_FILE',
+                filePath: relPath,
+                line: block.startLine,
+                confidence: 1.0,
+                evidence: `#[cfg(test)] mod ${modName}`,
+            });
+        }
+        const innerBlocks = scanRustBlocks(block.body, block.bodyStartLine);
+        for (const inner of innerBlocks) {
+            const nestedMod = RUST_INLINE_MOD_RE.exec(inner.header);
+            if (nestedMod) {
+                this.extractInlineModule(nestedMod[1], inner, modId, fileId, relPath, isTestMod, qualifiedMod, nodes, edges);
+                continue;
+            }
+            const fnMatch = RUST_FN_RE.exec(inner.header);
+            if (!fnMatch)
+                continue;
+            const fnName = fnMatch[1];
+            const fnParams = fnMatch[2].trim();
+            const fnRet = fnMatch[3]?.trim();
+            const hasTestAttr = inner.attrs.some((a) => RUST_TEST_ATTR_RE.test(a));
+            const isTestCase = hasTestAttr || (isTestMod && fnName.startsWith('test_'));
+            const fnId = `${fileId}${qualifiedMod}::${fnName}().`;
+            nodes.push({
+                id: fnId,
+                kind: isTestCase ? 'TestCase' : 'Function',
+                name: fnName,
+                qualifiedName: `${relPath}::${qualifiedMod}::${fnName}`,
+                filePath: relPath,
+                language: 'rust',
+                startLine: inner.startLine,
+                endLine: inner.endLine,
+                signature: `fn ${fnName}(${fnParams})${fnRet ? ` -> ${fnRet}` : ''}`,
+                returnType: fnRet,
+                exported: inner.header.trim().startsWith('pub'),
+            });
+            edges.push({
+                sourceId: modId,
+                targetId: fnId,
+                kind: 'CONTAINS',
+                filePath: relPath,
+                line: inner.startLine,
+                confidence: 1.0,
+            });
+            if (isTestCase) {
+                edges.push({
+                    sourceId: fnId,
+                    targetId: fileId,
+                    kind: 'TESTS_FILE',
+                    filePath: relPath,
+                    line: inner.startLine,
+                    confidence: 0.95,
+                    evidence: `${qualifiedMod}::${fnName}`,
+                });
+            }
+            // Only TestCase nodes emit TESTS_SYMBOL; plain helper fns inside `mod tests` emit CALLS
+            // so transitive blast-radius traversal reaches the real TestCase without labeling helpers as tests.
+            this.extractFnCalls(inner.body, fnId, fileId, relPath, inner.bodyStartLine, edges, isTestCase, qualifiedMod);
+        }
+    }
+    extractFnCalls(body, callerId, fileId, relPath, baseLine, edges, isTest = false, enclosingMod) {
         const bodyLines = body.split(/\r?\n/);
         for (let idx = 0; idx < bodyLines.length; idx++) {
             const line = bodyLines[idx];
@@ -843,21 +980,57 @@ export class RustCompilerAdapter {
             let match;
             while ((match = RUST_FN_CALL_RE.exec(line)) !== null) {
                 const calleeRaw = match[1];
-                const shortName = calleeRaw.includes('::')
-                    ? calleeRaw.slice(calleeRaw.lastIndexOf('::') + 2)
-                    : calleeRaw;
+                const parts = calleeRaw.split('::');
+                const shortName = parts[parts.length - 1] ?? calleeRaw;
                 if (RUST_CONTROL_KEYWORDS.has(shortName) || shortName.length <= 1)
                     continue;
+                const edgeKind = isTest ? 'TESTS_SYMBOL' : 'CALLS';
                 const targetId = `${fileId}${shortName}().`;
                 edges.push({
                     sourceId: callerId,
                     targetId,
-                    kind: isTest ? 'TESTS_SYMBOL' : 'CALLS',
+                    kind: edgeKind,
                     filePath: relPath,
                     line: lineNo,
                     confidence: 0.85,
                     evidence: `${calleeRaw}(...)`,
                 });
+                // Also link bare calls inside an inline module to sibling helper functions in the same module.
+                if (enclosingMod && parts.length === 1) {
+                    edges.push({
+                        sourceId: callerId,
+                        targetId: `${fileId}${enclosingMod}::${shortName}().`,
+                        kind: edgeKind,
+                        filePath: relPath,
+                        line: lineNo,
+                        confidence: 0.85,
+                        evidence: `${calleeRaw}(...)`,
+                    });
+                }
+                // Also link associated calls like `TypeName::method(...)` to the type and its impl method node.
+                if (parts.length >= 2) {
+                    const qualifier = parts[parts.length - 2] ?? '';
+                    if (/^[A-Z][A-Za-z0-9_]*$/.test(qualifier) && !RUST_CONTROL_KEYWORDS.has(qualifier)) {
+                        edges.push({
+                            sourceId: callerId,
+                            targetId: `${fileId}${qualifier}#${shortName}().`,
+                            kind: edgeKind,
+                            filePath: relPath,
+                            line: lineNo,
+                            confidence: 0.9,
+                            evidence: `${calleeRaw}(...)`,
+                        });
+                        edges.push({
+                            sourceId: callerId,
+                            targetId: `${fileId}${qualifier}#`,
+                            kind: edgeKind,
+                            filePath: relPath,
+                            line: lineNo,
+                            confidence: 0.85,
+                            evidence: `${calleeRaw}(...)`,
+                        });
+                    }
+                }
             }
         }
     }

@@ -29,6 +29,8 @@ interface RawRustEdge {
  */
 export declare function countRustBracesLine(line: string, inBlockComment: boolean, rawStringHashes: number): {
     delta: number;
+    firstOpenBraceIdx: number;
+    lastCloseBraceIdx: number;
     inBlockComment: boolean;
     rawStringHashes: number;
 };
@@ -42,6 +44,7 @@ export declare class RustCompilerAdapter implements CompilerAdapter {
         nodes: RawRustNode[];
         edges: RawRustEdge[];
     };
+    private extractInlineModule;
     private extractFnCalls;
 }
 export {};

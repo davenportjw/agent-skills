@@ -1,4 +1,4 @@
-import type { CompilerAdapter, CompilerGraphBatch, FileOutlineSymbol, GraphEdgeRecord, GraphNodeRecord } from '../types.js';
+import type { CompilerAdapter, CompilerGraphBatch, GraphEdgeRecord, GraphNodeRecord } from '../types.js';
 export declare class WebCompilerAdapter implements CompilerAdapter {
     readonly name = "web-composite";
     readonly languages: readonly ["html", "css"];
@@ -39,12 +39,7 @@ export declare class WebCompilerAdapter implements CompilerAdapter {
     }): void;
 }
 /**
- * Universal fallback structural chunker for Markdown, YAML, JSON, TOML, or any unindexed workspace file.
- * Guarantees that `ast_outline` never returns 0 symbols for a non-empty file on disk.
+ * Re-exported from ./fallback-outline.js so callers importing `db.ts` avoid loading `typescript`.
  */
-export declare function buildFallbackStructuralOutline(relPath: string, content: string): {
-    language: string;
-    lineCount: number;
-    symbols: FileOutlineSymbol[];
-};
+export { buildFallbackStructuralOutline } from './fallback-outline.js';
 //# sourceMappingURL=web-adapter.d.ts.map
