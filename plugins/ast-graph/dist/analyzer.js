@@ -26,7 +26,7 @@ export function analyzeGraph(db) {
     for (const r of langRows)
         nodesByLanguage[r.language] = Number(r.c);
     const edgeKindRows = db.db
-        .prepare('SELECT kind, COUNT(*) AS c FROM edges GROUP BY kind ORDER BY c DESC')
+        .prepare('SELECT k.kind, COUNT(*) AS c FROM edge_rows e JOIN edge_kinds k ON k.kid = e.kid GROUP BY e.kid ORDER BY c DESC')
         .all();
     const edgesByKind = {};
     for (const r of edgeKindRows)

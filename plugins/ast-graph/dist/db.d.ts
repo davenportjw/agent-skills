@@ -24,9 +24,11 @@ export declare class AstGraphDatabase {
     /** Empty every derived table (index rows, telemetry) while keeping the schema; forces a cold sync. */
     private resetDerivedData;
     /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
-    static readonly SCHEMA_VERSION = 3;
+    static readonly SCHEMA_VERSION = 4;
     /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
     private static readonly DERIVED_TABLES;
+    /** Legacy derived tables/views dropped during schema upgrades (e.g. v3 `edges` table -> v4 `edges` view). */
+    private static readonly LEGACY_DERIVED_OBJECTS;
     /** Set when the constructor discarded an outdated/foreign index; callers should run a full sync. */
     schemaRebuilt: {
         fromVersion: number;
@@ -35,8 +37,9 @@ export declare class AstGraphDatabase {
     /**
      * Bring an existing database file to SCHEMA_VERSION before CREATE TABLE IF NOT EXISTS runs.
      * The index is fully derived from source files, so the migration strategy for any older or
-     * foreign layout (e.g. legacy forks with a `labels_json` column) is drop-and-resync rather than
-     * column-level ALTERs. A database written by a *newer* plugin is refused with an actionable error.
+     * foreign layout (e.g. legacy forks with a `labels_json` column or v3 string-keyed `edges`)
+     * is drop-and-resync rather than column-level ALTERs. A database written by a *newer* plugin
+     * is refused with an actionable error.
      */
     private migrateSchema;
     /**
@@ -46,14 +49,17 @@ export declare class AstGraphDatabase {
      */
     checkpointWal(): void;
     /**
-     * Reclaims dead SQLite freelist pages and compacts FTS5 segments after heavy branch/file churn.
-     * Defaults to triggering when >= 4000 pages (~16MB) and >= 25% of pages are free.
+     * Reclaims dead SQLite freelist pages, prunes orphaned intern entries, and compacts FTS5 segments
+     * after heavy branch/file churn. Defaults to triggering when >= 4000 pages (~16MB) and >= 25%
+     * of pages are free.
      */
     compactIfNeeded(options?: {
         force?: boolean;
         minFreePages?: number;
         minFreeRatio?: number;
     }): boolean;
+    /** Remove unreferenced entries from symbol_ids and file_ids so intern tables stay bounded across churn. */
+    private pruneOrphanedInternEntries;
     /**
      * Seeds an empty worktree database in-place from its parent repository's `ast.db` (~10ms via
      * deferred ATTACH SELECT, safe even while another process reads or writes the parent WAL),

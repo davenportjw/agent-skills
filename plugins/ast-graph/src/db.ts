@@ -179,13 +179,16 @@ export class AstGraphDatabase {
 
 
   /** Current on-disk schema version (stored in `PRAGMA user_version` and `meta.schema_version`). */
-  public static readonly SCHEMA_VERSION = 3;
+  public static readonly SCHEMA_VERSION = 4;
 
   /** Derived index tables that are safe to drop and rebuild from source on a schema change. */
   private static readonly DERIVED_TABLES = [
     'nodes_fts',
     'node_labels',
-    'edges',
+    'edge_rows',
+    'symbol_ids',
+    'file_ids',
+    'edge_kinds',
     'diagnostics',
     'nodes',
     'files',
@@ -193,14 +196,18 @@ export class AstGraphDatabase {
     'query_telemetry',
   ];
 
+  /** Legacy derived tables/views dropped during schema upgrades (e.g. v3 `edges` table -> v4 `edges` view). */
+  private static readonly LEGACY_DERIVED_OBJECTS = ['edges'];
+
   /** Set when the constructor discarded an outdated/foreign index; callers should run a full sync. */
   public schemaRebuilt: { fromVersion: number; reason: string } | null = null;
 
   /**
    * Bring an existing database file to SCHEMA_VERSION before CREATE TABLE IF NOT EXISTS runs.
    * The index is fully derived from source files, so the migration strategy for any older or
-   * foreign layout (e.g. legacy forks with a `labels_json` column) is drop-and-resync rather than
-   * column-level ALTERs. A database written by a *newer* plugin is refused with an actionable error.
+   * foreign layout (e.g. legacy forks with a `labels_json` column or v3 string-keyed `edges`)
+   * is drop-and-resync rather than column-level ALTERs. A database written by a *newer* plugin
+   * is refused with an actionable error.
    */
   private migrateSchema(): void {
     const userVersion = Number(
@@ -213,27 +220,43 @@ export class AstGraphDatabase {
           'Upgrade the plugin, or delete the .ast-graph/ directory to rebuild with this version.',
       );
     }
-    const existing = new Set(
-      (this.db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>).map(
-        (r) => r.name,
-      ),
-    );
-    const stale = AstGraphDatabase.DERIVED_TABLES.filter((t) => existing.has(t));
+    const existingRows = this.db
+      .prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table','view')")
+      .all() as Array<{ name: string; type: string }>;
+    const existingTypes = new Map(existingRows.map((r) => [r.name, r.type]));
+    const dropCandidates = [
+      ...AstGraphDatabase.LEGACY_DERIVED_OBJECTS,
+      ...AstGraphDatabase.DERIVED_TABLES,
+    ];
+    const stale = dropCandidates.filter((name) => existingTypes.has(name));
     if (stale.length === 0) return; // fresh database
     this.db.exec('PRAGMA foreign_keys = OFF;');
-    for (const table of stale) {
-      this.db.exec(`DROP TABLE IF EXISTS "${table}";`);
+    for (const name of stale) {
+      if (existingTypes.get(name) === 'view') {
+        this.db.exec(`DROP VIEW IF EXISTS "${name}";`);
+      } else {
+        this.db.exec(`DROP TABLE IF EXISTS "${name}";`);
+      }
     }
-    if (existing.has('meta')) {
+    if (existingTypes.get('meta') === 'table') {
       const metaCols = (this.db.prepare('PRAGMA table_info(meta)').all() as Array<{ name: string }>).map((c) => c.name);
       if (!metaCols.includes('key') || !metaCols.includes('value')) {
         this.db.exec('DROP TABLE meta;');
       }
     }
     this.db.exec('PRAGMA foreign_keys = ON;');
+    // Immediately reclaim freed pages on disk when upgrading from bloated legacy schemas (e.g. v3 -> v4).
+    if (this.dbPath !== ':memory:') {
+      try {
+        this.db.exec('VACUUM;');
+        this.checkpointWal();
+      } catch {
+        // Best-effort; compactIfNeeded will reclaim later if another reader holds a lock.
+      }
+    }
     this.schemaRebuilt = {
       fromVersion: userVersion,
-      reason: `schema v${userVersion} -> v${AstGraphDatabase.SCHEMA_VERSION}: dropped ${stale.length} derived tables; full re-sync required`,
+      reason: `schema v${userVersion} -> v${AstGraphDatabase.SCHEMA_VERSION}: dropped ${stale.length} derived objects; full re-sync required`,
     };
   }
 
@@ -251,8 +274,9 @@ export class AstGraphDatabase {
   }
 
   /**
-   * Reclaims dead SQLite freelist pages and compacts FTS5 segments after heavy branch/file churn.
-   * Defaults to triggering when >= 4000 pages (~16MB) and >= 25% of pages are free.
+   * Reclaims dead SQLite freelist pages, prunes orphaned intern entries, and compacts FTS5 segments
+   * after heavy branch/file churn. Defaults to triggering when >= 4000 pages (~16MB) and >= 25%
+   * of pages are free.
    */
   public compactIfNeeded(options?: {
     force?: boolean;
@@ -271,6 +295,7 @@ export class AstGraphDatabase {
         options?.force === true ||
         (totalPages > 0 && freePages >= minFreePages && freePages / totalPages >= minFreeRatio);
       if (!shouldCompact) return false;
+      this.pruneOrphanedInternEntries();
       this.db.exec("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');");
       this.db.exec('VACUUM;');
       this.checkpointWal();
@@ -278,6 +303,18 @@ export class AstGraphDatabase {
     } catch {
       return false;
     }
+  }
+
+  /** Remove unreferenced entries from symbol_ids and file_ids so intern tables stay bounded across churn. */
+  private pruneOrphanedInternEntries(): void {
+    this.db.exec(`
+      DELETE FROM symbol_ids
+      WHERE sid NOT IN (SELECT src_sid FROM edge_rows UNION SELECT dst_sid FROM edge_rows)
+        AND id NOT IN (SELECT id FROM nodes);
+      DELETE FROM file_ids
+      WHERE fid NOT IN (SELECT fid FROM edge_rows)
+        AND file_path NOT IN (SELECT file_path FROM files);
+    `);
   }
 
   /**
@@ -314,7 +351,13 @@ export class AstGraphDatabase {
       // seed_parent while taking a write lock exclusively on `main`.
       this.db.exec('BEGIN');
       try {
+        // Clear any leftover intern rows (e.g. after removeDeletedFiles emptied `files` without
+        // compacting) so parent integer IDs (fid/kid/sid) map 1:1 with zero ID collisions.
         this.db.exec(`
+          DELETE FROM edge_rows;
+          DELETE FROM symbol_ids;
+          DELETE FROM file_ids;
+          DELETE FROM edge_kinds;
           INSERT OR IGNORE INTO files
             SELECT * FROM seed_parent.files
             WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
@@ -325,9 +368,17 @@ export class AstGraphDatabase {
             SELECT nl.node_id, nl.label
             FROM seed_parent.node_labels nl
             INNER JOIN nodes n ON n.id = nl.node_id;
-          INSERT OR IGNORE INTO edges
-            SELECT * FROM seed_parent.edges
+          INSERT OR IGNORE INTO file_ids (fid, file_path)
+            SELECT fid, file_path FROM seed_parent.file_ids
             WHERE file_path NOT LIKE '.worktrees/%' AND file_path NOT LIKE '%/.worktrees/%';
+          INSERT OR IGNORE INTO edge_kinds (kid, kind)
+            SELECT kid, kind FROM seed_parent.edge_kinds;
+          INSERT OR IGNORE INTO symbol_ids (sid, id)
+            SELECT sid, id FROM seed_parent.symbol_ids;
+          INSERT OR IGNORE INTO edge_rows (src_sid, kid, dst_sid, fid, line, col, weight, properties_json)
+            SELECT er.src_sid, er.kid, er.dst_sid, er.fid, er.line, er.col, er.weight, er.properties_json
+            FROM seed_parent.edge_rows er
+            INNER JOIN file_ids f ON f.fid = er.fid;
           INSERT OR IGNORE INTO diagnostics (file_path, enclosing_symbol_id, compiler, severity, code, message, line, col)
             SELECT file_path, enclosing_symbol_id, compiler, severity, code, message, line, col
             FROM seed_parent.diagnostics
@@ -414,17 +465,48 @@ export class AstGraphDatabase {
         FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
       ) STRICT;
 
-      CREATE TABLE IF NOT EXISTS edges (
-        src_id TEXT NOT NULL,
-        dst_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        file_path TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS symbol_ids (
+        sid INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS file_ids (
+        fid INTEGER PRIMARY KEY,
+        file_path TEXT NOT NULL UNIQUE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS edge_kinds (
+        kid INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL UNIQUE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS edge_rows (
+        src_sid INTEGER NOT NULL,
+        kid INTEGER NOT NULL,
+        dst_sid INTEGER NOT NULL,
+        fid INTEGER NOT NULL,
         line INTEGER NOT NULL,
         col INTEGER NOT NULL,
         weight REAL NOT NULL,
         properties_json TEXT NOT NULL,
-        PRIMARY KEY (src_id, dst_id, kind, file_path, line)
-      ) STRICT;
+        PRIMARY KEY (src_sid, kid, dst_sid, fid, line)
+      ) WITHOUT ROWID, STRICT;
+
+      CREATE VIEW IF NOT EXISTS edges AS
+        SELECT
+          s.id AS src_id,
+          d.id AS dst_id,
+          k.kind AS kind,
+          f.file_path AS file_path,
+          e.line AS line,
+          e.col AS col,
+          e.weight AS weight,
+          CASE WHEN e.properties_json = '' THEN '{}' ELSE e.properties_json END AS properties_json
+        FROM edge_rows e
+        JOIN symbol_ids s ON s.sid = e.src_sid
+        JOIN edge_kinds k ON k.kid = e.kid
+        JOIN symbol_ids d ON d.sid = e.dst_sid
+        JOIN file_ids f ON f.fid = e.fid;
 
       CREATE TABLE IF NOT EXISTS diagnostics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,10 +550,9 @@ export class AstGraphDatabase {
         file_path
       );
 
-      CREATE INDEX IF NOT EXISTS idx_edges_forward ON edges(src_id, kind, dst_id);
-      CREATE INDEX IF NOT EXISTS idx_edges_reverse ON edges(dst_id, kind, src_id);
-      CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
-      CREATE INDEX IF NOT EXISTS idx_edges_file ON edges(file_path);
+      CREATE INDEX IF NOT EXISTS idx_edge_rows_reverse ON edge_rows(dst_sid, kid, src_sid);
+      CREATE INDEX IF NOT EXISTS idx_edge_rows_kind ON edge_rows(kid);
+      CREATE INDEX IF NOT EXISTS idx_edge_rows_file ON edge_rows(fid);
       CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file_path);
       CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind, name);
       CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
@@ -514,7 +595,9 @@ export class AstGraphDatabase {
         'DELETE FROM node_labels WHERE node_id IN (SELECT id FROM nodes WHERE file_path = ?)',
       );
       const delNodes = this.db.prepare('DELETE FROM nodes WHERE file_path = ?');
-      const delEdges = this.db.prepare('DELETE FROM edges WHERE file_path = ?');
+      const delEdges = this.db.prepare(
+        'DELETE FROM edge_rows WHERE fid IN (SELECT fid FROM file_ids WHERE file_path = ?)',
+      );
       const delDiags = this.db.prepare('DELETE FROM diagnostics WHERE file_path = ?');
       const delFile = this.db.prepare('DELETE FROM files WHERE file_path = ?');
 
@@ -526,10 +609,14 @@ export class AstGraphDatabase {
         delDiags.run(fp);
         delFile.run(fp);
       }
-      // Also clean up any dangling edges whose src or dst node was removed
+      // Also clean up any dangling edges whose src node was removed
       this.db.exec(`
-        DELETE FROM edges
-        WHERE (src_id NOT LIKE 'scip-endpoint %' AND src_id NOT IN (SELECT id FROM nodes))
+        DELETE FROM edge_rows
+        WHERE src_sid IN (
+          SELECT s.sid FROM symbol_ids s
+          WHERE s.id NOT LIKE 'scip-endpoint %'
+            AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = s.id)
+        )
       `);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -549,7 +636,9 @@ export class AstGraphDatabase {
           'DELETE FROM node_labels WHERE node_id IN (SELECT id FROM nodes WHERE file_path = ?)',
         );
         const delNodes = this.db.prepare('DELETE FROM nodes WHERE file_path = ?');
-        const delEdges = this.db.prepare('DELETE FROM edges WHERE file_path = ?');
+        const delEdges = this.db.prepare(
+          'DELETE FROM edge_rows WHERE fid IN (SELECT fid FROM file_ids WHERE file_path = ?)',
+        );
         const delDiags = this.db.prepare('DELETE FROM diagnostics WHERE file_path = ?');
         const delFile = this.db.prepare('DELETE FROM files WHERE file_path = ?');
 
@@ -633,22 +722,92 @@ export class AstGraphDatabase {
         );
       }
 
-      const insEdge = this.db.prepare(`
-        INSERT OR REPLACE INTO edges (
-          src_id, dst_id, kind, file_path, line, col, weight, properties_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const e of batch.edges) {
-        insEdge.run(
-          e.srcId,
-          e.dstId,
-          e.kind,
-          e.filePath,
-          e.line,
-          e.col,
-          e.weight,
-          JSON.stringify(e.properties ?? {}),
-        );
+      if (batch.edges.length > 0) {
+        const symCache = new Map<string, number>();
+        const fileCache = new Map<string, number>();
+        const kindCache = new Map<string, number>();
+
+        for (const r of this.db.prepare('SELECT kid, kind FROM edge_kinds').all() as Array<{
+          kid: number;
+          kind: string;
+        }>) {
+          kindCache.set(r.kind, Number(r.kid));
+        }
+        for (const r of this.db.prepare('SELECT fid, file_path FROM file_ids').all() as Array<{
+          fid: number;
+          file_path: string;
+        }>) {
+          fileCache.set(r.file_path, Number(r.fid));
+        }
+
+        const insSym = this.db.prepare('INSERT OR IGNORE INTO symbol_ids (id) VALUES (?)');
+        const selSym = this.db.prepare('SELECT sid FROM symbol_ids WHERE id = ?');
+        const insFileId = this.db.prepare('INSERT OR IGNORE INTO file_ids (file_path) VALUES (?)');
+        const selFileId = this.db.prepare('SELECT fid FROM file_ids WHERE file_path = ?');
+        const insKind = this.db.prepare('INSERT OR IGNORE INTO edge_kinds (kind) VALUES (?)');
+        const selKind = this.db.prepare('SELECT kid FROM edge_kinds WHERE kind = ?');
+
+        const internSym = (id: string): number => {
+          const cached = symCache.get(id);
+          if (cached !== undefined) return cached;
+          const existing = selSym.get(id) as { sid?: number } | undefined;
+          if (existing?.sid !== undefined) {
+            const sid = Number(existing.sid);
+            symCache.set(id, sid);
+            return sid;
+          }
+          const res = insSym.run(id);
+          const sid =
+            res.changes > 0
+              ? Number(res.lastInsertRowid)
+              : Number((selSym.get(id) as { sid: number }).sid);
+          symCache.set(id, sid);
+          return sid;
+        };
+
+        const internFile = (fp: string): number => {
+          const cached = fileCache.get(fp);
+          if (cached !== undefined) return cached;
+          const res = insFileId.run(fp);
+          const fid =
+            res.changes > 0
+              ? Number(res.lastInsertRowid)
+              : Number((selFileId.get(fp) as { fid: number }).fid);
+          fileCache.set(fp, fid);
+          return fid;
+        };
+
+        const internKind = (kind: string): number => {
+          const cached = kindCache.get(kind);
+          if (cached !== undefined) return cached;
+          const res = insKind.run(kind);
+          const kid =
+            res.changes > 0
+              ? Number(res.lastInsertRowid)
+              : Number((selKind.get(kind) as { kid: number }).kid);
+          kindCache.set(kind, kid);
+          return kid;
+        };
+
+        const insEdge = this.db.prepare(`
+          INSERT OR REPLACE INTO edge_rows (
+            src_sid, kid, dst_sid, fid, line, col, weight, properties_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const e of batch.edges) {
+          const propStr =
+            e.properties && Object.keys(e.properties).length > 0 ? JSON.stringify(e.properties) : '';
+          insEdge.run(
+            internSym(e.srcId),
+            internKind(e.kind),
+            internSym(e.dstId),
+            internFile(e.filePath),
+            e.line,
+            e.col,
+            e.weight,
+            propStr,
+          );
+        }
       }
 
       const insDiag = this.db.prepare(`
@@ -726,7 +885,7 @@ export class AstGraphDatabase {
   } {
     const files = (this.db.prepare('SELECT COUNT(*) AS c FROM files').get() as { c: number }).c;
     const nodes = (this.db.prepare('SELECT COUNT(*) AS c FROM nodes').get() as { c: number }).c;
-    const edges = (this.db.prepare('SELECT COUNT(*) AS c FROM edges').get() as { c: number }).c;
+    const edges = (this.db.prepare('SELECT COUNT(*) AS c FROM edge_rows').get() as { c: number }).c;
     const diagnostics = (this.db.prepare('SELECT COUNT(*) AS c FROM diagnostics').get() as { c: number }).c;
     const packages = (
       this.db.prepare("SELECT COUNT(*) AS c FROM nodes WHERE kind = 'WorkspacePackage'").get() as { c: number }
@@ -1761,28 +1920,39 @@ export class AstGraphDatabase {
     const seedList = [...seedIds].slice(0, 25);
     const placeholders = seedList.map(() => '?').join(', ');
 
-    // Upstream recursive CTE over idx_edges_reverse(dst_id, kind, src_id)
+    // Upstream recursive CTE over integer idx_edge_rows_reverse(dst_sid, kid, src_sid)
     const cteRows = this.db
       .prepare(
-        `WITH RECURSIVE upstream(node_id, from_id, edge_kind, hop) AS (
-           SELECT e.src_id, e.dst_id, e.kind, 1
-           FROM edges e
-           WHERE e.dst_id IN (${placeholders})
-             AND e.kind IN ('CALLS', 'REFERENCES', 'READS_PROPERTY', 'WRITES_PROPERTY', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'VALIDATES_SCHEMA', 'HANDLES_ROUTE', 'CONNECTS_ENDPOINT', 'TESTS_SYMBOL', 'TESTS_FILE')
-           UNION
-           SELECT e.src_id, u.node_id, e.kind, u.hop + 1
-           FROM upstream u
-           JOIN edges e ON e.dst_id = u.node_id
-           WHERE u.hop < ?
-             AND e.kind IN ('CALLS', 'REFERENCES', 'READS_PROPERTY', 'WRITES_PROPERTY', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'VALIDATES_SCHEMA', 'HANDLES_ROUTE', 'CONNECTS_ENDPOINT', 'TESTS_SYMBOL', 'TESTS_FILE')
-         )
+        `WITH RECURSIVE
+           blast_kinds(kid, kind) AS (
+             SELECT kid, kind FROM edge_kinds
+             WHERE kind IN ('CALLS', 'REFERENCES', 'READS_PROPERTY', 'WRITES_PROPERTY', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'VALIDATES_SCHEMA', 'HANDLES_ROUTE', 'CONNECTS_ENDPOINT', 'TESTS_SYMBOL', 'TESTS_FILE')
+           ),
+           seed_sids(sid) AS (
+             SELECT sid FROM symbol_ids WHERE id IN (${placeholders})
+           ),
+           upstream(node_sid, from_sid, kid, hop) AS (
+             SELECT e.src_sid, e.dst_sid, e.kid, 1
+             FROM edge_rows e
+             JOIN seed_sids ss ON ss.sid = e.dst_sid
+             JOIN blast_kinds bk ON bk.kid = e.kid
+             UNION
+             SELECT e.src_sid, u.node_sid, e.kid, u.hop + 1
+             FROM upstream u
+             JOIN edge_rows e ON e.dst_sid = u.node_sid
+             JOIN blast_kinds bk ON bk.kid = e.kid
+             WHERE u.hop < ?
+           )
          SELECT
            n.id, n.name, n.qualified_name, n.kind, n.package_name, n.file_path, n.start_line, n.end_line,
            MIN(u.hop) AS hop_distance,
-           u.edge_kind AS via_edge_kind,
-           u.from_id AS from_symbol_id
+           k.kind AS via_edge_kind,
+           fs.id AS from_symbol_id
          FROM upstream u
-         JOIN nodes n ON n.id = u.node_id
+         JOIN symbol_ids ns ON ns.sid = u.node_sid
+         JOIN nodes n ON n.id = ns.id
+         JOIN symbol_ids fs ON fs.sid = u.from_sid
+         JOIN edge_kinds k ON k.kid = u.kid
          WHERE n.id NOT IN (${placeholders})
            AND n.kind != 'WorkspacePackage'
          GROUP BY n.id
