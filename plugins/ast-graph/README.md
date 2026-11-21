@@ -106,6 +106,10 @@ ln -sfn "$(pwd)" ~/.gemini/config/plugins/ast-graph
 
 Restart Antigravity after linking. If you have the old `~/.gemini/config/plugins/ast-graph-traceability` folder, remove it so the two don't both load.
 
+### Subagents and swarm workers (required step)
+
+Subagents and swarm workers don't load plugin rules or hooks; they only inherit your global agent file (`~/.gemini/GEMINI.md`, `~/.claude/CLAUDE.md`, or `~/.codex/AGENTS.md`). Add the "Code Navigation (ast-graph)" section from [CHANGELOG.md](CHANGELOG.md) to that file so workers use the CLI instead of grep.
+
 ### Building from source
 
 ```bash
