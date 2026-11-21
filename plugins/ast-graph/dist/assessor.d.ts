@@ -15,7 +15,9 @@ export interface GitWorkspaceInfo {
 export declare function resolveGitInfo(workspaceRoot: string): GitWorkspaceInfo | null;
 /**
  * Reads the current Git HEAD state (`<ref>:<sha>` or `detached:<sha>`) directly from `.git`
- * without spawning a subprocess (<0.1ms), supporting linked worktrees and `packed-refs`.
+ * without spawning a subprocess (<0.1ms) for `files` ref-format repos (including linked worktrees
+ * and `packed-refs`), and falls back to `git --git-dir` for `reftable` repos whose `.git/HEAD`
+ * contains the `ref: refs/heads/.invalid` sentinel.
  */
 export declare function resolveGitHeadSignature(workspaceRoot: string): string | null;
 export declare function ensureGitExclude(canonicalRoot: string): boolean;

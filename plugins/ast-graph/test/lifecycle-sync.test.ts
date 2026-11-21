@@ -235,4 +235,28 @@ describe('repository, branch, and worktree lifecycle synchronization', () => {
       { kind: 'repo-created', targetPath: path.resolve('/tmp/demo/proj') },
     ]);
   });
+
+  it('resolves HEAD signatures across files and reftable backends (unborn, branch, detached)', () => {
+    for (const refFormat of ['files', 'reftable'] as const) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ast-head-${refFormat}-`));
+      tempDirs.push(dir);
+      try {
+        git(dir, ['init', '-b', 'main', `--ref-format=${refFormat}`]);
+      } catch {
+        // Older git versions without --ref-format support only test the default backend
+        continue;
+      }
+
+      expect(resolveGitHeadSignature(dir)).toBe('refs/heads/main:unborn');
+
+      fs.writeFileSync(path.join(dir, 'index.ts'), 'export const v = 1;\n');
+      git(dir, ['add', '.']);
+      git(dir, ['commit', '-m', 'init']);
+      const sha = git(dir, ['rev-parse', 'HEAD']);
+      expect(resolveGitHeadSignature(dir)).toBe(`refs/heads/main:${sha}`);
+
+      git(dir, ['checkout', '--detach', sha]);
+      expect(resolveGitHeadSignature(dir)).toBe(`detached:${sha}`);
+    }
+  });
 });

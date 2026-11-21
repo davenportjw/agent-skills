@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -145,9 +146,43 @@ export function resolveGitInfo(workspaceRoot: string): GitWorkspaceInfo | null {
   }
 }
 
+function resolveGitHeadViaCli(gitDir: string): string | null {
+  try {
+    const out = execFileSync(
+      'git',
+      ['--git-dir', gitDir, 'rev-parse', 'HEAD', '--symbolic-full-name', 'HEAD'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }
+    ).trim();
+    const lines = out
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length >= 2) {
+      const [sha, sym] = lines;
+      if (sym === 'HEAD') return `detached:${sha}`;
+      return `${sym}:${sha}`;
+    }
+  } catch {
+    // HEAD may be unborn (no commits yet) — fall through to symbolic-ref
+  }
+  try {
+    const sym = execFileSync(
+      'git',
+      ['--git-dir', gitDir, 'symbolic-ref', '-q', 'HEAD'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }
+    ).trim();
+    if (sym) return `${sym}:unborn`;
+  } catch {
+    // Ignore if git is unavailable or HEAD is unreadable
+  }
+  return null;
+}
+
 /**
  * Reads the current Git HEAD state (`<ref>:<sha>` or `detached:<sha>`) directly from `.git`
- * without spawning a subprocess (<0.1ms), supporting linked worktrees and `packed-refs`.
+ * without spawning a subprocess (<0.1ms) for `files` ref-format repos (including linked worktrees
+ * and `packed-refs`), and falls back to `git --git-dir` for `reftable` repos whose `.git/HEAD`
+ * contains the `ref: refs/heads/.invalid` sentinel.
  */
 export function resolveGitHeadSignature(workspaceRoot: string): string | null {
   const info = resolveGitInfo(workspaceRoot);
@@ -162,6 +197,9 @@ export function resolveGitHeadSignature(workspaceRoot: string): string | null {
       return `detached:${headRaw}`;
     }
     const refName = refMatch[1].trim();
+    if (refName === 'refs/heads/.invalid') {
+      return resolveGitHeadViaCli(info.gitDir);
+    }
     for (const base of [info.gitDir, info.commonDir]) {
       const looseRef = path.join(base, refName);
       if (fs.existsSync(looseRef) && fs.statSync(looseRef).isFile()) {
