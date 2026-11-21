@@ -30,3 +30,9 @@ Always use the **AST GraphDB Plugin** (`node ~/.gemini/config/plugins/ast-graph/
    - *(If the repo defines `npm run ast:query`, that wraps the same CLI; in sessions where `call_mcp_tool` is mounted on `ast-graph_ast-graph`, `ast_outline`/`ast_symbol`/`ast_search`/`ast_refs`/`ast_blast_radius`/`ast_tests_for`/`ast_lineage` remain available as a secondary interface with no schema read needed.)*
 4. **Targeted Test Selection**: Before running a full test suite, run `tests <symOrFile>` (or `blast <symOrFile>`) to obtain the exact language-aware test command (`npx vitest run ...`, `uv run pytest ...`, `go test ...`, or `cargo test ...`).
 5. **Batch Symbols, Grep Literals Only**: Pass multiple targets in one CLI call (`outline f1 f2`, `symbol s1 s2`, `search q1 q2`, `refs p1 p2`) instead of `grep "a\|b\|c"`. Reserve `grep -rn` / `rg` strictly for string literals, UI copy, CSS values, and log text that are not code symbols.
+
+## 3. Delegation: Put the CLI Line in Every Brief
+- Subagents and swarm workers start fresh and often only see their brief. When you write a brief (`invoke_subagent` prompt or `swarm` `add`) for code work in a repo, **paste the exact CLI line with the worktree the worker will use**, e.g.:
+  `Code navigation: use node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline|symbol|refs|search|blast|tests <targets...> --workspace /abs/path/to/repo/.worktrees/<item> instead of grep/sed/cat.`
+- Name the CLI, not MCP tool names (`ast_outline`, ...): the CLI works in every harness and worker, while MCP may be unmounted (or a stale server build) in a worker session.
+- `WORKSPACE_NOT_FOUND` (exit 2) means the `--workspace` path does not exist (e.g. a removed worktree); run `git worktree list` and retry with a live path.

@@ -928,6 +928,14 @@ function getPositionalArgs(args: string[]): string[] {
   return positionals;
 }
 
+function isExistingDirectory(dir: string): boolean {
+  try {
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export async function executeCliCommand(
   rawArgs: string[],
   options?: CliExecutionOptions,
@@ -947,6 +955,16 @@ export async function executeCliCommand(
     workspaceFlag ??
     (command === 'assess' && primaryTarget ? primaryTarget : process.cwd());
   const workspaceRoot = canonicalizeWorkspaceRoot(rawWorkspace);
+  // Never create `.ast-graph/` (and its parent directories) for a path that does not exist, e.g. a
+  // worktree that was already removed: fail loudly instead of returning a phantom empty index.
+  if (!isExistingDirectory(workspaceRoot)) {
+    const message = `WORKSPACE_NOT_FOUND: "${rawWorkspace}" is not an existing directory. Pass --workspace <repo-or-worktree-root> (see \`git worktree list\`).`;
+    return {
+      exitCode: 2,
+      output: rawJson ? JSON.stringify({ error: 'WORKSPACE_NOT_FOUND', workspace: rawWorkspace, message }, null, 2) : message,
+      data: { error: 'WORKSPACE_NOT_FOUND', workspace: rawWorkspace },
+    };
+  }
   const dbFlag = parseFlagValue(rawArgs, '--db');
   const dbPath =
     options?.dbPath ??

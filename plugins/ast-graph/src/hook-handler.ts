@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -39,6 +39,12 @@ export interface HookInvocationOptions {
    * so harness hook timeouts (10-20s) never kill a long first build of a large repo.
    */
   coldBuild?: 'inline' | 'background';
+  /**
+   * Whether SessionStart injects a short hint naming the exact CLI command, repo root and linked
+   * worktrees so agents (and the subagents/swarm workers they brief) query the graph instead of
+   * grepping. Defaults to true; disable with `AST_GRAPH_SESSION_HINT=0`.
+   */
+  sessionHint?: boolean;
 }
 
 export interface ParsedHookInput {
@@ -411,6 +417,67 @@ function runHookSync(
   }
 }
 
+/** Prefer the stable `~/.gemini/config/plugins/...` path in hints when it points at this build. */
+function displayCliPath(): string | null {
+  const cli = resolveCliEntrypoint();
+  if (!cli) return null;
+  const home = process.env.HOME;
+  if (home) {
+    const stable = path.join(home, '.gemini', 'config', 'plugins', 'ast-graph', 'dist', 'cli.js');
+    try {
+      if (fs.realpathSync(stable) === fs.realpathSync(cli)) return '~/.gemini/config/plugins/ast-graph/dist/cli.js';
+    } catch {
+      // stable path not installed; fall through to the absolute path
+    }
+  }
+  return cli;
+}
+
+/** Linked worktrees of `wsRoot` (excluding itself), capped so the hint stays small. */
+export function listLinkedWorktrees(wsRoot: string, limit = 6): string[] {
+  try {
+    const out = execFileSync('git', ['-C', wsRoot, 'worktree', 'list', '--porcelain'], {
+      encoding: 'utf8',
+      timeout: 1500,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const self = canonicalizeWorkspaceRoot(wsRoot);
+    return out
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice('worktree '.length).trim())
+      .filter((p) => p && fs.existsSync(p) && canonicalizeWorkspaceRoot(p) !== self)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Short SessionStart hint: the exact CLI invocation, per-root `--workspace`, and delegation guidance. */
+export function buildSessionHint(roots: string[]): string | null {
+  const cli = displayCliPath();
+  if (!cli || roots.length === 0) return null;
+  const lines = [
+    `ast-graph is active for this session. Use the CLI via run_command instead of grep/sed/cat for code navigation:`,
+    `  node ${cli} outline|symbol|refs|search|blast|tests <targets...> --workspace <root>`,
+    `Roots: ${roots.map((r) => `--workspace ${r}`).join(' ; ')}`,
+  ];
+  const worktrees = roots.flatMap((r) => listLinkedWorktrees(r));
+  if (worktrees.length > 0) {
+    lines.push(`Worktrees have their own index; pass the worktree path itself: ${worktrees.map((w) => `--workspace ${w}`).join(' ; ')}`);
+  }
+  lines.push(
+    `When briefing subagents or swarm workers, copy the CLI line above (with the worktree they work in) into the brief.`,
+  );
+  return lines.join('\n');
+}
+
+function sessionHintEnabled(options?: HookInvocationOptions): boolean {
+  if (options?.sessionHint !== undefined) return options.sessionHint;
+  const env = (process.env.AST_GRAPH_SESSION_HINT ?? '').trim().toLowerCase();
+  return !(env === '0' || env === 'false' || env === 'off');
+}
+
 /**
  * Executes a hook invocation for either `session-start` or `post-tool-use` and returns
  * the harness-compatible stdout JSON response alongside timing telemetry.
@@ -601,6 +668,21 @@ export async function handleHookInvocation(
     stdoutJson = { continue: true };
   } else {
     stdoutJson = {};
+  }
+
+  const isSessionStart = lowerEvent === 'session-start' || lowerEvent === 'sessionstart';
+  if (isSessionStart && sessionHintEnabled(options)) {
+    const hint = buildSessionHint(resolvedWorkspaces);
+    if (hint) {
+      if (parsed.harness === 'antigravity') {
+        stdoutJson = { injectSteps: [{ systemMessage: { systemMessage: hint } }] };
+      } else if (parsed.harness === 'claude-code') {
+        stdoutJson = {
+          continue: true,
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: hint },
+        };
+      }
+    }
   }
 
   return {

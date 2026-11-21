@@ -77,6 +77,10 @@ node ~/.gemini/config/plugins/ast-graph/dist/cli.js blast <SymbolOrFile> --works
 node ~/.gemini/config/plugins/ast-graph/dist/cli.js tests <SymbolOrFile> --workspace /path/to/repo
 ```
 
+**Delegating?** Subagents and swarm workers usually only see their brief. Paste the exact CLI line with the worker's worktree path into every brief for code work, e.g. `Code navigation: node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline|symbol|refs|search|blast|tests <targets...> --workspace /abs/repo/.worktrees/<item> (not grep/sed/cat).` A nonexistent `--workspace` path now fails with `WORKSPACE_NOT_FOUND` (exit 2) instead of creating an empty index.
+
+The SessionStart hook injects the same CLI line, the repo root, and linked worktrees into the session (Antigravity `injectSteps` / Claude Code `additionalContext`). Disable with `AST_GRAPH_SESSION_HINT=0`.
+
 ---
 
 ## 4. Optional MCP Tools (`ast-graph`)

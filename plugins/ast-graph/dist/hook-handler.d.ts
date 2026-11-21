@@ -20,6 +20,12 @@ export interface HookInvocationOptions {
      * so harness hook timeouts (10-20s) never kill a long first build of a large repo.
      */
     coldBuild?: 'inline' | 'background';
+    /**
+     * Whether SessionStart injects a short hint naming the exact CLI command, repo root and linked
+     * worktrees so agents (and the subagents/swarm workers they brief) query the graph instead of
+     * grepping. Defaults to true; disable with `AST_GRAPH_SESSION_HINT=0`.
+     */
+    sessionHint?: boolean;
 }
 export interface ParsedHookInput {
     harness: HookHarnessFormat;
@@ -55,6 +61,10 @@ export declare function extractGitLifecycleActions(commandLine: string, defaultC
  * Polymorphically parses stdin JSON from either Antigravity or Claude Code hook harnesses.
  */
 export declare function parseHookInput(eventTypeArg: string, rawStdinJson: string): ParsedHookInput;
+/** Linked worktrees of `wsRoot` (excluding itself), capped so the hint stays small. */
+export declare function listLinkedWorktrees(wsRoot: string, limit?: number): string[];
+/** Short SessionStart hint: the exact CLI invocation, per-root `--workspace`, and delegation guidance. */
+export declare function buildSessionHint(roots: string[]): string | null;
 /**
  * Executes a hook invocation for either `session-start` or `post-tool-use` and returns
  * the harness-compatible stdout JSON response alongside timing telemetry.
