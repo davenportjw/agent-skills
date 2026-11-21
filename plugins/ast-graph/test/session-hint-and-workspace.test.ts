@@ -95,3 +95,87 @@ describe('SessionStart CLI hint', () => {
     expect(hint).toContain('feat-x');
   });
 });
+
+describe('PreToolUse delegation brief overwrite', () => {
+  it('appends the CLI line to swarm add briefs with --workspace <repo> for inherit', async () => {
+    const repo = makeTempRepo('brief-swarm');
+    const result = await handleHookInvocation(
+      'pre-tool-use',
+      JSON.stringify({
+        workspacePaths: [repo],
+        toolCall: {
+          name: 'swarm',
+          args: { action: 'add', name: 'worker', brief: 'Implement feature X.' },
+        },
+      }),
+    );
+    const out = result.stdoutJson as { decision: string; overwrite?: { brief?: string } };
+    expect(out.decision).toBe('allow');
+    expect(out.overwrite?.brief).toContain('Implement feature X.');
+    expect(out.overwrite?.brief).toMatch(/node \S*cli\.js outline\|symbol\|refs\|search\|blast\|tests/);
+    expect(out.overwrite?.brief).toContain(`--workspace ${repo}`);
+  });
+
+  it('uses <your-worktree-cwd> when swarm workspace is share or branch', async () => {
+    const repo = makeTempRepo('brief-share');
+    const result = await handleHookInvocation(
+      'pre-tool-use',
+      JSON.stringify({
+        workspacePaths: [repo],
+        toolCall: {
+          name: 'swarm',
+          args: { action: 'add', name: 'worker', workspace: 'share', brief: 'Edit files.' },
+        },
+      }),
+    );
+    const out = result.stdoutJson as { decision: string; overwrite?: { brief?: string } };
+    expect(out.decision).toBe('allow');
+    expect(out.overwrite?.brief).toContain('--workspace <your-worktree-cwd>');
+  });
+
+  it('skips overwrite when brief already includes ast-graph cli.js or action is not add', async () => {
+    const repo = makeTempRepo('brief-skip');
+    const already = await handleHookInvocation(
+      'pre-tool-use',
+      JSON.stringify({
+        workspacePaths: [repo],
+        toolCall: {
+          name: 'swarm',
+          args: {
+            action: 'add',
+            name: 'worker',
+            brief: 'Use node ~/.gemini/config/plugins/ast-graph/dist/cli.js outline src/a.ts',
+          },
+        },
+      }),
+    );
+    expect(already.stdoutJson).toEqual({ decision: 'allow' });
+
+    const status = await handleHookInvocation(
+      'pre-tool-use',
+      JSON.stringify({
+        workspacePaths: [repo],
+        toolCall: { name: 'swarm', args: { action: 'status' } },
+      }),
+    );
+    expect(status.stdoutJson).toEqual({ decision: 'allow' });
+  });
+
+  it('appends the CLI line to invoke_subagent Prompt', async () => {
+    const repo = makeTempRepo('brief-subagent');
+    const result = await handleHookInvocation(
+      'pre-tool-use',
+      JSON.stringify({
+        workspacePaths: [repo],
+        toolCall: {
+          name: 'invoke_subagent',
+          args: { TypeName: 'self', Role: 'Researcher', Prompt: 'Inspect src/a.ts.' },
+        },
+      }),
+    );
+    const out = result.stdoutJson as { decision: string; overwrite?: { Prompt?: string } };
+    expect(out.decision).toBe('allow');
+    expect(out.overwrite?.Prompt).toContain('Inspect src/a.ts.');
+    expect(out.overwrite?.Prompt).toContain(`--workspace ${repo}`);
+  });
+});

@@ -392,6 +392,46 @@ function sessionHintEnabled(options) {
     return !(env === '0' || env === 'false' || env === 'off');
 }
 /**
+ * Injects the `ast-graph` CLI line into Antigravity `swarm` (`action: "add"`) briefs and
+ * `invoke_subagent` prompts via `PreToolUse` `overwrite`, unless already present.
+ */
+export function buildDelegationBriefOverwrite(parsed, fallbackRoot) {
+    if (parsed.harness !== 'antigravity')
+        return undefined;
+    const toolCall = parsed.rawPayload.toolCall;
+    const args = toolCall?.args;
+    if (!args)
+        return undefined;
+    let targetKey;
+    let text;
+    let isIsolated = false;
+    if (parsed.toolName === 'swarm' && args.action === 'add' && typeof args.brief === 'string') {
+        targetKey = 'brief';
+        text = args.brief;
+        isIsolated = args.workspace === 'share' || args.workspace === 'branch';
+    }
+    else if (parsed.toolName === 'invoke_subagent' && typeof args.Prompt === 'string') {
+        targetKey = 'Prompt';
+        text = args.Prompt;
+        isIsolated = args.Workspace === 'share' || args.Workspace === 'branch';
+    }
+    else {
+        return undefined;
+    }
+    // Skip if the coordinator already included an ast-graph CLI reference.
+    if (/ast-graph[\/\\]dist[\/\\]cli\.js/i.test(text))
+        return undefined;
+    const cli = displayCliPath();
+    if (!cli)
+        return undefined;
+    const rawRoot = parsed.workspacePaths[0] ?? fallbackRoot;
+    const wsRoot = findEnclosingRepoRoot(rawRoot) ?? canonicalizeWorkspaceRoot(rawRoot);
+    const workspaceArg = isIsolated ? '<your-worktree-cwd>' : wsRoot;
+    const cliLine = `Code navigation: use \`node ${cli} outline|symbol|refs|search|blast|tests <targets...> --workspace ${workspaceArg}\` instead of grep/sed/cat.`;
+    const updated = text.trimEnd().length > 0 ? `${text.trimEnd()}\n\n${cliLine}` : cliLine;
+    return { [targetKey]: updated };
+}
+/**
  * Executes a hook invocation for either `session-start` or `post-tool-use` and returns
  * the harness-compatible stdout JSON response alongside timing telemetry.
  */
@@ -428,9 +468,12 @@ export async function handleHookInvocation(eventTypeArg, rawStdinJson, options) 
                 }
             }
         }
+        const overwrite = buildDelegationBriefOverwrite(parsed, fallbackRoot);
         const durationMs = Number((performance.now() - startTime).toFixed(2));
         const stdoutJson = parsed.harness === 'antigravity'
-            ? { decision: 'allow' }
+            ? overwrite
+                ? { decision: 'allow', overwrite }
+                : { decision: 'allow' }
             : parsed.harness === 'claude-code'
                 ? { continue: true }
                 : {};

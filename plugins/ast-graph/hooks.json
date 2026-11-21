@@ -10,7 +10,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "run_command",
+        "matcher": "run_command|swarm|invoke_subagent",
         "hooks": [
           {
             "type": "command",

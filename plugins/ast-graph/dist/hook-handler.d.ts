@@ -66,6 +66,11 @@ export declare function listLinkedWorktrees(wsRoot: string, limit?: number): str
 /** Short SessionStart hint: the exact CLI invocation, per-root `--workspace`, and delegation guidance. */
 export declare function buildSessionHint(roots: string[]): string | null;
 /**
+ * Injects the `ast-graph` CLI line into Antigravity `swarm` (`action: "add"`) briefs and
+ * `invoke_subagent` prompts via `PreToolUse` `overwrite`, unless already present.
+ */
+export declare function buildDelegationBriefOverwrite(parsed: ParsedHookInput, fallbackRoot: string): Record<string, unknown> | undefined;
+/**
  * Executes a hook invocation for either `session-start` or `post-tool-use` and returns
  * the harness-compatible stdout JSON response alongside timing telemetry.
  */
