@@ -21,27 +21,42 @@ Works with **Google Antigravity**, **Claude Code**, and **OpenAI Codex CLI**.
 
 ### Antigravity
 
+To load `thinking-arcade` across **all** workspaces (not just inside this `agent-skills` clone), symlink it into `~/.gemini/config/plugins/` and start/verify the sidecar:
+
 ```bash
-# From a clone of this repo
+# Run from the root of your agent-skills clone
+mkdir -p ~/.gemini/config/plugins
 ln -sfn "$(pwd)/plugins/thinking-arcade" ~/.gemini/config/plugins/thinking-arcade
+
+# Start the sidecar daemon and verify status + resolved flags
+node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs start
+node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs status
+node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs flags
 ```
 
-Restart Antigravity. On each new prompt the agent shows a **▶ Open Model Invaders** link; click it to open the game in the right pane. Each **Needs you** row there links to its conversation. The pane belongs to one chat, so it closes when you switch chats.
+**Verification checklist (for agents installing on a new machine):**
+1. `ls -la ~/.gemini/config/plugins/thinking-arcade` points to `<repo>/plugins/thinking-arcade` (without this global symlink, `.agents/plugins.json` only loads the plugin inside `agent-skills`).
+2. `arcade-cli.mjs status` reports `"daemonLive": true` on `http://127.0.0.1:4777`.
+3. `arcade-cli.mjs flags` shows `"display_mode": "auxiliary"` (the default inside Antigravity; run `arcade-cli.mjs reset` to clear any stale override in `~/.config/agent-skills/thinking-arcade.json`).
+4. Start a new Antigravity conversation (or restart Antigravity if the plugin isn't picked up immediately).
 
-Change where the game appears with `display_mode` (global, or per workspace in `.agents/thinking-arcade.json`):
+On each new prompt in `auxiliary` mode, the agent streams a **▶ Open Model Invaders** link (`sidecar://thinking-arcade/arcade-daemon/`); click it to dock the game in Antigravity's Right Auxiliary Pane (Antigravity cannot auto-open the pane without a click). Each **Needs you** row there links to its conversation. The pane belongs to one chat, so it closes when you switch chats.
+
+Change where the game appears with `display_mode` (global in `~/.config/agent-skills/thinking-arcade.json`, or per workspace in `.agents/thinking-arcade.json`):
 
 ```bash
 node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs mode <mode>
 node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs flags   # show resolved flags
+node ~/.gemini/config/plugins/thinking-arcade/scripts/arcade-cli.mjs reset   # reset to default (auxiliary)
 ```
 
-| Mode | Behavior |
-| :--- | :--- |
-| `auxiliary` *(default)* | Link that opens the game in the right pane. |
-| `window` | One shared app window, opened by the hook on prompt start. If you close it, the agent shows a reopen link instead of reopening it. |
-| `inline` / `inline-follow` | Game embedded in chat on the first turn / on every turn. |
-| `both` | Right-pane link plus inline embed. |
-| `off` | Nothing shown; the server still runs at `http://127.0.0.1:4777`. |
+| Mode | Where it renders | Behavior |
+| :--- | :--- | :--- |
+| `auxiliary` *(default)* | **Inside Antigravity** (Right Auxiliary Pane) | Agent streams a one-click `▶ Open Model Invaders` link that docks the game in the right pane. |
+| `inline` / `inline-follow` | **Inside Antigravity** (chat stream) | Auto-embeds `<agent-embed>` in chat on the first turn / on every turn (no click needed). |
+| `both` | **Inside Antigravity** (pane + chat) | Right-pane link plus inline chat embed. |
+| `window` | **External app window** (outside Antigravity) | One shared app window opened by the hook on prompt start. If closed, the agent shows a reopen link instead of reopening it. |
+| `off` | None | Nothing shown; the server still runs at `http://127.0.0.1:4777`. |
 
 ### Claude Code
 
